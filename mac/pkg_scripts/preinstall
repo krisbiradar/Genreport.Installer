@@ -1,0 +1,122 @@
+#!/bin/bash
+# mac/pkg_scripts/preinstall
+#
+# Runs as root BEFORE files are copied.
+# Collects all user input via osascript dialogs, then writes values to
+# /tmp/genreport_install_config for postinstall to consume.
+
+set -e
+
+# ── Helper: prompt for a single value ────────────────────────────────────────
+ask() {
+  local prompt="$1"
+  local default="$2"
+  local secret="$3"   # "true" = hidden (password) field
+
+  if [ "$secret" = "true" ]; then
+    osascript -e "
+      set result to display dialog \"$prompt\" \
+        default answer \"\" \
+        with hidden answer \
+        with title \"Genreport Setup\" \
+        buttons {\"Continue\"} default button 1
+      return text returned of result"
+  else
+    osascript -e "
+      set result to display dialog \"$prompt\" \
+        default answer \"$default\" \
+        with title \"Genreport Setup\" \
+        buttons {\"Continue\"} default button 1
+      return text returned of result"
+  fi
+}
+
+# ── Helper: section banner (info dialog between page groups) ─────────────────
+banner() {
+  osascript -e "
+    display dialog \"$1\" \
+      with title \"Genreport Setup\" \
+      buttons {\"Continue\"} default button 1" > /dev/null
+}
+
+# ── Page 1: Database ──────────────────────────────────────────────────────────
+banner "Step 1 of 4 — Database configuration\n\nEnter your PostgreSQL connection details."
+
+DB_HOST=$(ask "Database host:" "localhost")
+DB_PORT=$(ask "Database port:" "5432")
+DB_NAME=$(ask "Database name:" "genreport")
+DB_USER=$(ask "Database username:" "postgres")
+DB_PASS=$(ask "Database password:" "" "true")
+
+# ── Page 2: Ports ─────────────────────────────────────────────────────────────
+# Auto-detect running services before presenting defaults
+check_port() {
+  nc -z 127.0.0.1 "$1" 2>/dev/null && echo "in use" || echo "free"
+}
+
+RABBIT_STATUS=$(check_port 5672)
+OLLAMA_STATUS=$(check_port 11434)
+
+DETECT_MSG="Step 2 of 4 — Ports\n\n"
+if [ "$RABBIT_STATUS" = "in use" ]; then
+  DETECT_MSG="${DETECT_MSG}RabbitMQ: already running on 5672 (will use existing)\n"
+else
+  DETECT_MSG="${DETECT_MSG}RabbitMQ: not running (bundled version will start)\n"
+fi
+if [ "$OLLAMA_STATUS" = "in use" ]; then
+  DETECT_MSG="${DETECT_MSG}Ollama: already running on 11434 (will use existing)\n"
+else
+  DETECT_MSG="${DETECT_MSG}Ollama: not running (bundled version will start)\n"
+fi
+DETECT_MSG="${DETECT_MSG}\nAdjust ports below if needed."
+
+banner "$DETECT_MSG"
+
+DOTNET_PORT=$(ask "Step 2 of 4 — .NET API port:" "5000")
+GO_PORT=$(ask "Step 2 of 4 — Go service port:" "12334")
+RABBIT_PORT=$(ask "Step 2 of 4 — RabbitMQ port:" "5672")
+OLLAMA_PORT=$(ask "Step 2 of 4 — Ollama port:" "11434")
+
+# ── Page 3: SMTP ──────────────────────────────────────────────────────────────
+banner "Step 3 of 4 — Email (SMTP)\n\nOutbound email settings. Leave blank to configure later."
+
+SMTP_HOST=$(ask "SMTP host (leave blank to skip):" "")
+SMTP_PORT=$(ask "SMTP port:" "587")
+SMTP_USER=$(ask "SMTP username:" "")
+SMTP_PASS=$(ask "SMTP password:" "" "true")
+SMTP_FROM=$(ask "From address:" "noreply@genreport.app")
+
+# ── Page 4: Cloudflare R2 ─────────────────────────────────────────────────────
+banner "Step 4 of 4 — R2 Storage (Cloudflare)\n\nLeave blank to configure later."
+
+R2_ACCOUNT=$(ask "R2 Account ID:" "")
+R2_BUCKET=$(ask "R2 Bucket:" "")
+R2_KEY=$(ask "R2 Access Key ID:" "")
+R2_SECRET=$(ask "R2 Secret Key:" "" "true")
+R2_URL=$(ask "R2 Public URL:" "")
+
+# ── Write temp config for postinstall ─────────────────────────────────────────
+cat > /tmp/genreport_install_config <<EOF
+DB_HOST="$DB_HOST"
+DB_PORT="$DB_PORT"
+DB_NAME="$DB_NAME"
+DB_USER="$DB_USER"
+DB_PASS="$DB_PASS"
+DOTNET_PORT="$DOTNET_PORT"
+GO_PORT="$GO_PORT"
+RABBIT_PORT="$RABBIT_PORT"
+OLLAMA_PORT="$OLLAMA_PORT"
+SMTP_HOST="$SMTP_HOST"
+SMTP_PORT="$SMTP_PORT"
+SMTP_USER="$SMTP_USER"
+SMTP_PASS="$SMTP_PASS"
+SMTP_FROM="$SMTP_FROM"
+R2_ACCOUNT="$R2_ACCOUNT"
+R2_BUCKET="$R2_BUCKET"
+R2_KEY="$R2_KEY"
+R2_SECRET="$R2_SECRET"
+R2_URL="$R2_URL"
+EOF
+
+chmod 600 /tmp/genreport_install_config
+exit 0

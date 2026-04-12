@@ -1,0 +1,132 @@
+# .github/workflows/release.yml
+#
+# Triggered on a version tag (e.g. v1.0.0).
+# Builds:
+#   - configwriter for Windows (amd64) and macOS (arm64 + amd64)
+#   - GenreportSetup.exe via Inno Setup on a Windows runner
+#   - Genreport.pkg via pkgbuild on a macOS runner
+# Then attaches both artifacts to the GitHub Release.
+#
+# TODO: fill in artifact download steps once launcher and other
+#       publish/* binaries are built in their own repos/workflows.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+
+  # ── Build configwriter ──────────────────────────────────────────────────────
+  build-configwriter:
+    name: Build configwriter (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: windows
+            goarch: amd64
+            artifact: configwriter.exe
+          - goos: darwin
+            goarch: amd64
+            artifact: configwriter-darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            artifact: configwriter-darwin-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build
+        working-directory: configwriter
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: '0'
+        run: go build -ldflags="-s -w" -o ../${{ matrix.artifact }} .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  # ── Windows installer (Inno Setup) ─────────────────────────────────────────
+  build-windows-installer:
+    name: Build Windows installer
+    needs: build-configwriter
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: configwriter.exe
+          path: publish/
+
+      # TODO: download launcher.exe, dotnet publish, goservice.exe, web, ollama, rabbitmq, models here
+
+      - name: Compile Inno Setup script
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: windows/setup.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GenreportSetup.exe
+          path: windows/dist/GenreportSetup.exe
+
+  # ── macOS installer (pkgbuild) ─────────────────────────────────────────────
+  build-mac-installer:
+    name: Build macOS installer
+    needs: build-configwriter
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: configwriter-darwin-arm64   # swap for amd64 or use a universal binary
+          path: publish/
+
+      - name: Make scripts executable
+        run: chmod +x mac/pkg_scripts/preinstall mac/pkg_scripts/postinstall
+
+      # TODO: copy launcher, ollama, rabbitmq, web, dotnet publish into payload/
+
+      - name: Build .pkg
+        run: |
+          pkgbuild \
+            --root payload/ \
+            --scripts mac/pkg_scripts \
+            --identifier com.genreport.installer \
+            --version "${GITHUB_REF_NAME}" \
+            --install-location /Applications/Genreport \
+            Genreport.pkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Genreport.pkg
+          path: Genreport.pkg
+
+  # ── Publish GitHub Release ─────────────────────────────────────────────────
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-windows-installer, build-mac-installer]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts/
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-artifacts/GenreportSetup.exe/GenreportSetup.exe
+            release-artifacts/Genreport.pkg/Genreport.pkg

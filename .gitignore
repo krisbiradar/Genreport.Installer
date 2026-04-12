@@ -1,0 +1,19 @@
+# Build outputs
+windows/dist/
+mac/dist/
+payload/
+publish/
+*.exe
+*.pkg
+configwriter-darwin-*
+
+# Go
+configwriter/vendor/
+
+# macOS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+*.swp

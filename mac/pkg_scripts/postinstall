@@ -1,0 +1,46 @@
+#!/bin/bash
+# mac/pkg_scripts/postinstall
+#
+# Runs as root AFTER files are copied.
+# Sources the temp config written by preinstall, calls the config writer binary,
+# registers the launchd service, then removes the temp file (it contains secrets).
+
+set -e
+# shellcheck source=/dev/null
+source /tmp/genreport_install_config
+
+INSTALL_DIR="/Applications/Genreport"
+
+# ── Run the config writer ─────────────────────────────────────────────────────
+"$INSTALL_DIR/configwriter" \
+  --installdir   "$INSTALL_DIR" \
+  --dbhost       "$DB_HOST" \
+  --dbport       "$DB_PORT" \
+  --dbname       "$DB_NAME" \
+  --dbuser       "$DB_USER" \
+  --dbpassword   "$DB_PASS" \
+  --dotnetport   "$DOTNET_PORT" \
+  --goport       "$GO_PORT" \
+  --rabbitmqport "$RABBIT_PORT" \
+  --ollamaport   "$OLLAMA_PORT" \
+  --smtphost     "$SMTP_HOST" \
+  --smtpport     "$SMTP_PORT" \
+  --smtpuser     "$SMTP_USER" \
+  --smtppass     "$SMTP_PASS" \
+  --smtpfrom     "$SMTP_FROM" \
+  --r2accountid  "$R2_ACCOUNT" \
+  --r2bucket     "$R2_BUCKET" \
+  --r2accesskey  "$R2_KEY" \
+  --r2secretkey  "$R2_SECRET" \
+  --r2publicurl  "$R2_URL"
+
+# ── Register launchd service ──────────────────────────────────────────────────
+cp "$INSTALL_DIR/com.genreport.launcher.plist" \
+   /Library/LaunchDaemons/
+
+launchctl load /Library/LaunchDaemons/com.genreport.launcher.plist
+
+# ── Clean up (temp file contains passwords) ───────────────────────────────────
+rm -f /tmp/genreport_install_config
+
+exit 0
