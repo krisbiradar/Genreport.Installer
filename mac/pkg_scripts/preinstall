@@ -31,7 +31,7 @@ ask() {
   fi
 }
 
-# ── Helper: section banner (info dialog between page groups) ─────────────────
+# ── Helper: section banner ────────────────────────────────────────────────────
 banner() {
   osascript -e "
     display dialog \"$1\" \
@@ -48,34 +48,10 @@ DB_NAME=$(ask "Database name:" "genreport")
 DB_USER=$(ask "Database username:" "postgres")
 DB_PASS=$(ask "Database password:" "" "true")
 
-# ── Page 2: Ports ─────────────────────────────────────────────────────────────
-# Auto-detect running services before presenting defaults
-check_port() {
-  nc -z 127.0.0.1 "$1" 2>/dev/null && echo "in use" || echo "free"
-}
+# ── Page 2: Application port ──────────────────────────────────────────────────
+banner "Step 2 of 4 — Application port\n\nGenreport will be accessible at http://localhost:[port]\n\nAll internal services are managed automatically.\nChange the port only if 2905 is already in use."
 
-RABBIT_STATUS=$(check_port 5672)
-OLLAMA_STATUS=$(check_port 11434)
-
-DETECT_MSG="Step 2 of 4 — Ports\n\n"
-if [ "$RABBIT_STATUS" = "in use" ]; then
-  DETECT_MSG="${DETECT_MSG}RabbitMQ: already running on 5672 (will use existing)\n"
-else
-  DETECT_MSG="${DETECT_MSG}RabbitMQ: not running (bundled version will start)\n"
-fi
-if [ "$OLLAMA_STATUS" = "in use" ]; then
-  DETECT_MSG="${DETECT_MSG}Ollama: already running on 11434 (will use existing)\n"
-else
-  DETECT_MSG="${DETECT_MSG}Ollama: not running (bundled version will start)\n"
-fi
-DETECT_MSG="${DETECT_MSG}\nAdjust ports below if needed."
-
-banner "$DETECT_MSG"
-
-DOTNET_PORT=$(ask "Step 2 of 4 — .NET API port:" "5000")
-GO_PORT=$(ask "Step 2 of 4 — Go service port:" "12334")
-RABBIT_PORT=$(ask "Step 2 of 4 — RabbitMQ port:" "5672")
-OLLAMA_PORT=$(ask "Step 2 of 4 — Ollama port:" "11434")
+APP_PORT=$(ask "Application port:" "2905")
 
 # ── Page 3: SMTP ──────────────────────────────────────────────────────────────
 banner "Step 3 of 4 — Email (SMTP)\n\nOutbound email settings. Leave blank to configure later."
@@ -102,10 +78,7 @@ DB_PORT="$DB_PORT"
 DB_NAME="$DB_NAME"
 DB_USER="$DB_USER"
 DB_PASS="$DB_PASS"
-DOTNET_PORT="$DOTNET_PORT"
-GO_PORT="$GO_PORT"
-RABBIT_PORT="$RABBIT_PORT"
-OLLAMA_PORT="$OLLAMA_PORT"
+APP_PORT="$APP_PORT"
 SMTP_HOST="$SMTP_HOST"
 SMTP_PORT="$SMTP_PORT"
 SMTP_USER="$SMTP_USER"

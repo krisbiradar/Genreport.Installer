@@ -14,13 +14,13 @@ WizardStyle=modern
 PrivilegesRequired=admin
 
 [Files]
-Source: "publish\dotnet\*";         DestDir: "{app}\dotnet";         Flags: recursesubdirs
-Source: "publish\goservice.exe";    DestDir: "{app}\go"
-Source: "publish\web\*";            DestDir: "{app}\web";            Flags: recursesubdirs
-Source: "publish\ollama\*";         DestDir: "{app}\ollama";         Flags: recursesubdirs
-Source: "publish\rabbitmq\*";       DestDir: "{app}\rabbitmq";       Flags: recursesubdirs
-Source: "publish\models\*";         DestDir: "{app}\ollama\models";  Flags: recursesubdirs
-Source: "publish\launcher.exe";     DestDir: "{app}"
+Source: "publish\dotnet\*";      DestDir: "{app}\dotnet";        Flags: recursesubdirs
+Source: "publish\goservice.exe"; DestDir: "{app}\go"
+Source: "publish\web\*";         DestDir: "{app}\web";           Flags: recursesubdirs
+Source: "publish\ollama\*";      DestDir: "{app}\ollama";        Flags: recursesubdirs
+Source: "publish\rabbitmq\*";    DestDir: "{app}\rabbitmq";      Flags: recursesubdirs
+Source: "publish\models\*";      DestDir: "{app}\ollama\models"; Flags: recursesubdirs
+Source: "publish\launcher.exe";  DestDir: "{app}"
 Source: "publish\configwriter.exe"; DestDir: "{app}"
 
 [Icons]
@@ -31,10 +31,10 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 // ── Page handles ──────────────────────────────────────────────────────────────
 var
-  PageDB:    TInputQueryWizardPage;
-  PagePorts: TInputQueryWizardPage;
-  PageSMTP:  TInputQueryWizardPage;
-  PageR2:    TInputQueryWizardPage;
+  PageDB:   TInputQueryWizardPage;
+  PageApp:  TInputQueryWizardPage;
+  PageSMTP: TInputQueryWizardPage;
+  PageR2:   TInputQueryWizardPage;
 
 procedure InitializeWizard;
 begin
@@ -47,20 +47,18 @@ begin
   PageDB.Add('Port:',          False); PageDB.Values[1] := '5432';
   PageDB.Add('Database name:', False); PageDB.Values[2] := 'genreport';
   PageDB.Add('Username:',      False); PageDB.Values[3] := 'postgres';
-  PageDB.Add('Password:',      True);  // masked field
+  PageDB.Add('Password:',      True);  // masked
 
-  // Page 2 — Ports (shown with auto-detected defaults)
-  PagePorts := CreateInputQueryPage(PageDB.ID,
-    'Ports & dependencies',
-    'Default ports shown. Change only if there are conflicts.',
-    'The installer has checked for existing RabbitMQ and Ollama installations.');
-  PagePorts.Add('.NET API port:',   False); PagePorts.Values[0] := '5000';
-  PagePorts.Add('Go service port:', False); PagePorts.Values[1] := '12334';
-  PagePorts.Add('RabbitMQ port:',   False); PagePorts.Values[2] := '5672';
-  PagePorts.Add('Ollama port:',     False); PagePorts.Values[3] := '11434';
+  // Page 2 — Application port (single field — all internal ports are managed automatically)
+  PageApp := CreateInputQueryPage(PageDB.ID,
+    'Application port',
+    'Choose the port Genreport will be accessible on.',
+    'Open http://localhost:[port] in your browser after installation. ' +
+    'Change this only if port 2905 is already in use on your machine.');
+  PageApp.Add('Port:', False); PageApp.Values[0] := '2905';
 
   // Page 3 — SMTP
-  PageSMTP := CreateInputQueryPage(PagePorts.ID,
+  PageSMTP := CreateInputQueryPage(PageApp.ID,
     'Email (SMTP)',
     'Outbound email settings. Leave blank to configure later.',
     'Used for notifications and password resets.');
@@ -89,28 +87,24 @@ begin
 
   if CurPageID = PageDB.ID then begin
     if PageDB.Values[0] = '' then begin
-      MsgBox('Host is required.', mbError, MB_OK);
-      Result := False; Exit;
+      MsgBox('Host is required.', mbError, MB_OK); Result := False; Exit;
     end;
     if PageDB.Values[2] = '' then begin
-      MsgBox('Database name is required.', mbError, MB_OK);
-      Result := False; Exit;
+      MsgBox('Database name is required.', mbError, MB_OK); Result := False; Exit;
     end;
     if PageDB.Values[3] = '' then begin
-      MsgBox('Username is required.', mbError, MB_OK);
-      Result := False; Exit;
+      MsgBox('Username is required.', mbError, MB_OK); Result := False; Exit;
     end;
   end;
 
-  if CurPageID = PagePorts.ID then begin
-    if PagePorts.Values[0] = '' then begin
-      MsgBox('All port fields are required.', mbError, MB_OK);
-      Result := False; Exit;
+  if CurPageID = PageApp.ID then begin
+    if PageApp.Values[0] = '' then begin
+      MsgBox('Application port is required.', mbError, MB_OK); Result := False; Exit;
     end;
   end;
 end;
 
-// ── Post-install: invoke config writer + register Windows Service ─────────────
+// ── Post-install: call configwriter + register Windows Service ────────────────
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ConfigWriter, Params: String;
@@ -120,26 +114,23 @@ begin
     ConfigWriter := ExpandConstant('{app}\configwriter.exe');
 
     Params :=
-      ' --installdir "'   + ExpandConstant('{app}') + '"' +
-      ' --dbhost "'       + PageDB.Values[0] + '"' +
-      ' --dbport "'       + PageDB.Values[1] + '"' +
-      ' --dbname "'       + PageDB.Values[2] + '"' +
-      ' --dbuser "'       + PageDB.Values[3] + '"' +
-      ' --dbpassword "'   + PageDB.Values[4] + '"' +
-      ' --dotnetport "'   + PagePorts.Values[0] + '"' +
-      ' --goport "'       + PagePorts.Values[1] + '"' +
-      ' --rabbitmqport "' + PagePorts.Values[2] + '"' +
-      ' --ollamaport "'   + PagePorts.Values[3] + '"' +
-      ' --smtphost "'     + PageSMTP.Values[0] + '"' +
-      ' --smtpport "'     + PageSMTP.Values[1] + '"' +
-      ' --smtpuser "'     + PageSMTP.Values[2] + '"' +
-      ' --smtppass "'     + PageSMTP.Values[3] + '"' +
-      ' --smtpfrom "'     + PageSMTP.Values[4] + '"' +
-      ' --r2accountid "'  + PageR2.Values[0] + '"' +
-      ' --r2bucket "'     + PageR2.Values[1] + '"' +
-      ' --r2accesskey "'  + PageR2.Values[2] + '"' +
-      ' --r2secretkey "'  + PageR2.Values[3] + '"' +
-      ' --r2publicurl "'  + PageR2.Values[4] + '"';
+      ' --installdir "'  + ExpandConstant('{app}') + '"' +
+      ' --appport "'     + PageApp.Values[0] + '"' +
+      ' --dbhost "'      + PageDB.Values[0] + '"' +
+      ' --dbport "'      + PageDB.Values[1] + '"' +
+      ' --dbname "'      + PageDB.Values[2] + '"' +
+      ' --dbuser "'      + PageDB.Values[3] + '"' +
+      ' --dbpassword "'  + PageDB.Values[4] + '"' +
+      ' --smtphost "'    + PageSMTP.Values[0] + '"' +
+      ' --smtpport "'    + PageSMTP.Values[1] + '"' +
+      ' --smtpuser "'    + PageSMTP.Values[2] + '"' +
+      ' --smtppass "'    + PageSMTP.Values[3] + '"' +
+      ' --smtpfrom "'    + PageSMTP.Values[4] + '"' +
+      ' --r2accountid "' + PageR2.Values[0] + '"' +
+      ' --r2bucket "'    + PageR2.Values[1] + '"' +
+      ' --r2accesskey "' + PageR2.Values[2] + '"' +
+      ' --r2secretkey "' + PageR2.Values[3] + '"' +
+      ' --r2publicurl "' + PageR2.Values[4] + '"';
 
     if not Exec(ConfigWriter, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
       MsgBox('Config writer failed (code ' + IntToStr(ResultCode) + '). Installation may be incomplete.',
