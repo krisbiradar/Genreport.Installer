@@ -12,6 +12,8 @@ package main
 // never surfaced to the user.
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"log"
@@ -53,7 +55,21 @@ var (
 	r2AccessKey = flag.String("r2accesskey", "", "R2 Access Key ID")
 	r2SecretKey = flag.String("r2secretkey", "", "R2 Secret Access Key")
 	r2PublicURL = flag.String("r2publicurl", "", "R2 Public URL")
+
+	// Security — auto-generated if empty
+	jwtSecret     = flag.String("jwtsecret", "", "JWT signing secret (auto-generated if blank)")
+	encryptionKey = flag.String("encryptionkey", "", "AES encryption master key (auto-generated if blank)")
 )
+
+// generateSecret returns a cryptographically-random hex string of the given byte length.
+// byteLen=32 → 64 hex chars (256-bit key).
+func generateSecret(byteLen int) string {
+	b := make([]byte, byteLen)
+	if _, err := rand.Read(b); err != nil {
+		log.Fatalf("failed to generate random secret: %v", err)
+	}
+	return hex.EncodeToString(b)
+}
 
 func main() {
 	flag.Parse()
@@ -61,6 +77,18 @@ func main() {
 	if *installDir == "" {
 		fmt.Fprintln(os.Stderr, "error: --installdir is required")
 		os.Exit(1)
+	}
+
+	// Auto-generate secrets if the caller did not supply them.
+	if *jwtSecret == "" {
+		s := generateSecret(32) // 256-bit
+		jwtSecret = &s
+		fmt.Println("JWT secret auto-generated.")
+	}
+	if *encryptionKey == "" {
+		s := generateSecret(32) // 256-bit
+		encryptionKey = &s
+		fmt.Println("Encryption master key auto-generated.")
 	}
 
 	if err := writeLauncherConf(*installDir); err != nil {
@@ -108,7 +136,9 @@ const appSettingsTemplate = `{
     "DefaultConnection": "Host={{.DBHost}};Port={{.DBPort}};Database={{.DBName}};Username={{.DBUser}};Password={{.DBPass}}"
   },
   "AppSettings": {
-    "GoServiceUrl": "http://localhost:{{.InternalGoPort}}"
+    "GoServiceUrl": "http://localhost:{{.InternalGoPort}}",
+    "JwtSecret": "{{.JwtSecret}}",
+    "EncryptionKey": "{{.EncryptionKey}}"
   },
   "Smtp": {
     "Host":     "{{.SmtpHost}}",
@@ -156,6 +186,9 @@ DOTNET_URL=http://localhost:{{.InternalDotnetPort}}
 RABBITMQ_URL=amqp://guest:guest@localhost:{{.InternalRabbitMQPort}}/
 OLLAMA_URL=http://localhost:{{.InternalOllamaPort}}
 
+JWT_SECRET={{.JwtSecret}}
+ENCRYPTION_KEY={{.EncryptionKey}}
+
 SMTP_HOST={{.SmtpHost}}
 SMTP_PORT={{.SmtpPort}}
 SMTP_USER={{.SmtpUser}}
@@ -195,6 +228,9 @@ type Config struct {
 	R2AccountID, R2Bucket            string
 	R2AccessKey, R2SecretKey         string
 	R2PublicURL                      string
+	// Security (auto-generated or user-supplied)
+	JwtSecret     string
+	EncryptionKey string
 	// Hardcoded internal
 	InternalDotnetPort, InternalGoPort       string
 	InternalRabbitMQPort, InternalOllamaPort string
@@ -209,6 +245,8 @@ func configData() Config {
 		SmtpPass: *smtpPass, SmtpFrom: *smtpFrom,
 		R2AccountID: *r2AccountID, R2Bucket: *r2Bucket,
 		R2AccessKey: *r2AccessKey, R2SecretKey: *r2SecretKey, R2PublicURL: *r2PublicURL,
+		JwtSecret:     *jwtSecret,
+		EncryptionKey: *encryptionKey,
 		InternalDotnetPort:   internalDotnetPort,
 		InternalGoPort:       internalGoPort,
 		InternalRabbitMQPort: internalRabbitMQPort,

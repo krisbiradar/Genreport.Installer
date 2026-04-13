@@ -71,6 +71,12 @@ R2_KEY=$(ask "R2 Access Key ID:" "")
 R2_SECRET=$(ask "R2 Secret Key:" "" "true")
 R2_URL=$(ask "R2 Public URL:" "")
 
+# ── Page 5: Security keys ─────────────────────────────────────────────────────────
+banner "Step 5 of 5 — Security keys\n\nLeave as \"(auto-generate)\" to have the installer create strong random 256-bit keys.\n\nEnter custom values only when migrating an existing installation."
+
+JWT_SECRET=$(ask "JWT signing secret (leave as-is to auto-generate):" "(auto-generate)" "true")
+ENCRYPTION_KEY=$(ask "Encryption master key (leave as-is to auto-generate):" "(auto-generate)" "true")
+
 # ── Write temp config for postinstall ─────────────────────────────────────────
 cat > /tmp/genreport_install_config <<EOF
 DB_HOST="$DB_HOST"
@@ -89,6 +95,8 @@ R2_BUCKET="$R2_BUCKET"
 R2_KEY="$R2_KEY"
 R2_SECRET="$R2_SECRET"
 R2_URL="$R2_URL"
+JWT_SECRET="$JWT_SECRET"
+ENCRYPTION_KEY="$ENCRYPTION_KEY"
 EOF
 
 chmod 600 /tmp/genreport_install_config

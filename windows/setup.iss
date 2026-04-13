@@ -31,10 +31,11 @@ Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 // ── Page handles ──────────────────────────────────────────────────────────────
 var
-  PageDB:   TInputQueryWizardPage;
-  PageApp:  TInputQueryWizardPage;
-  PageSMTP: TInputQueryWizardPage;
-  PageR2:   TInputQueryWizardPage;
+  PageDB:       TInputQueryWizardPage;
+  PageApp:      TInputQueryWizardPage;
+  PageSMTP:     TInputQueryWizardPage;
+  PageR2:       TInputQueryWizardPage;
+  PageSecurity: TInputQueryWizardPage;
 
 procedure InitializeWizard;
 begin
@@ -78,6 +79,17 @@ begin
   PageR2.Add('Access Key ID:', False);
   PageR2.Add('Secret Key:',    True);
   PageR2.Add('Public URL:',    False);
+  // Page 5 — Security keys (optional override)
+  PageSecurity := CreateInputQueryPage(PageR2.ID,
+    'Security keys',
+    'JWT secret and encryption master key.',
+    'Leave as "(auto-generate)" to have the installer create strong random ' +
+    '256-bit keys. You can also enter your own values if you are migrating ' +
+    'an existing installation.');
+  PageSecurity.Add('JWT signing secret:', True);
+  PageSecurity.Values[0] := '(auto-generate)';
+  PageSecurity.Add('Encryption master key:', True);
+  PageSecurity.Values[1] := '(auto-generate)';
 end;
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -131,6 +143,13 @@ begin
       ' --r2accesskey "' + PageR2.Values[2] + '"' +
       ' --r2secretkey "' + PageR2.Values[3] + '"' +
       ' --r2publicurl "' + PageR2.Values[4] + '"';
+
+    // Only pass security keys if the user supplied custom values.
+    // Leaving blank (or the placeholder) lets configwriter auto-generate.
+    if (PageSecurity.Values[0] <> '') and (PageSecurity.Values[0] <> '(auto-generate)') then
+      Params := Params + ' --jwtsecret "' + PageSecurity.Values[0] + '"';
+    if (PageSecurity.Values[1] <> '') and (PageSecurity.Values[1] <> '(auto-generate)') then
+      Params := Params + ' --encryptionkey "' + PageSecurity.Values[1] + '"';
 
     if not Exec(ConfigWriter, Params, '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then begin
       MsgBox('Config writer failed (code ' + IntToStr(ResultCode) + '). Installation may be incomplete.',

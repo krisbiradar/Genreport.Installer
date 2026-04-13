@@ -12,24 +12,36 @@ source /tmp/genreport_install_config
 INSTALL_DIR="/Applications/Genreport"
 
 # ── Run the config writer ─────────────────────────────────────────────────────
-"$INSTALL_DIR/configwriter" \
-  --installdir  "$INSTALL_DIR" \
-  --appport     "$APP_PORT" \
-  --dbhost      "$DB_HOST" \
-  --dbport      "$DB_PORT" \
-  --dbname      "$DB_NAME" \
-  --dbuser      "$DB_USER" \
-  --dbpassword  "$DB_PASS" \
-  --smtphost    "$SMTP_HOST" \
-  --smtpport    "$SMTP_PORT" \
-  --smtpuser    "$SMTP_USER" \
-  --smtppass    "$SMTP_PASS" \
-  --smtpfrom    "$SMTP_FROM" \
-  --r2accountid "$R2_ACCOUNT" \
-  --r2bucket    "$R2_BUCKET" \
-  --r2accesskey "$R2_KEY" \
-  --r2secretkey "$R2_SECRET" \
+# Build the base args; security keys are added conditionally below.
+CW_ARGS=(
+  --installdir  "$INSTALL_DIR"
+  --appport     "$APP_PORT"
+  --dbhost      "$DB_HOST"
+  --dbport      "$DB_PORT"
+  --dbname      "$DB_NAME"
+  --dbuser      "$DB_USER"
+  --dbpassword  "$DB_PASS"
+  --smtphost    "$SMTP_HOST"
+  --smtpport    "$SMTP_PORT"
+  --smtpuser    "$SMTP_USER"
+  --smtppass    "$SMTP_PASS"
+  --smtpfrom    "$SMTP_FROM"
+  --r2accountid "$R2_ACCOUNT"
+  --r2bucket    "$R2_BUCKET"
+  --r2accesskey "$R2_KEY"
+  --r2secretkey "$R2_SECRET"
   --r2publicurl "$R2_URL"
+)
+
+# Only pass custom security keys; omit flags to let configwriter auto-generate.
+if [ -n "$JWT_SECRET" ] && [ "$JWT_SECRET" != "(auto-generate)" ]; then
+  CW_ARGS+=(--jwtsecret "$JWT_SECRET")
+fi
+if [ -n "$ENCRYPTION_KEY" ] && [ "$ENCRYPTION_KEY" != "(auto-generate)" ]; then
+  CW_ARGS+=(--encryptionkey "$ENCRYPTION_KEY")
+fi
+
+"$INSTALL_DIR/configwriter" "${CW_ARGS[@]}"
 
 # ── Register launchd service ──────────────────────────────────────────────────
 cp "$INSTALL_DIR/com.genreport.launcher.plist" \
