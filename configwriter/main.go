@@ -138,7 +138,9 @@ const appSettingsTemplate = `{
   "AppSettings": {
     "GoServiceUrl": "http://localhost:{{.InternalGoPort}}",
     "JwtSecret": "{{.JwtSecret}}",
-    "EncryptionKey": "{{.EncryptionKey}}"
+    "EncryptionKey": "{{.EncryptionKey}}",
+    "CreateDb": true,
+    "DeleteDb": true
   },
   "Smtp": {
     "Host":     "{{.SmtpHost}}",
@@ -180,6 +182,9 @@ DB_PORT={{.DBPort}}
 DB_NAME={{.DBName}}
 DB_USER={{.DBUser}}
 DB_PASSWORD={{.DBPass}}
+
+CREATE_DB=true
+DELETE_DB=true
 
 PORT={{.InternalGoPort}}
 DOTNET_URL=http://localhost:{{.InternalDotnetPort}}

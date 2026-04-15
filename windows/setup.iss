@@ -42,7 +42,7 @@ begin
   // Page 1 — Database
   PageDB := CreateInputQueryPage(wpSelectDir,
     'Database configuration',
-    'Enter your PostgreSQL connection details.',
+    'WARNING: If the database already exists it will be overwritten. Choose the name carefully! (Attach DB support will come later)',
     'These will be written to appsettings.json and the Go .env file.');
   PageDB.Add('Host:',          False); PageDB.Values[0] := 'localhost';
   PageDB.Add('Port:',          False); PageDB.Values[1] := '5432';

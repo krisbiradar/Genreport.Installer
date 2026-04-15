@@ -40,7 +40,7 @@ banner() {
 }
 
 # ── Page 1: Database ──────────────────────────────────────────────────────────
-banner "Step 1 of 4 — Database configuration\n\nEnter your PostgreSQL connection details."
+banner "Step 1 of 4 — Database configuration\n\nWARNING: If the database already exists it will be overwritten. Choose the name carefully! (Attach DB support will come later).\n\nEnter your PostgreSQL connection details."
 
 DB_HOST=$(ask "Database host:" "localhost")
 DB_PORT=$(ask "Database port:" "5432")
