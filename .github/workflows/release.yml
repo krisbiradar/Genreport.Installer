@@ -14,6 +14,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - master
     tags:
       - 'v*.*.*'
 
@@ -62,13 +64,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
+  
       - uses: actions/download-artifact@v4
         with:
           name: configwriter.exe
           path: publish/
 
-      # TODO: download launcher.exe, dotnet publish, goservice.exe, web, ollama, rabbitmq, models here
+      # TODO: Build repos and put launcher.exe, dotnet publish, goservice.exe, web, ollama, rabbitmq, models here
 
       - name: Compile Inno Setup script
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
@@ -88,6 +90,30 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Checkout Frontend Repo
+        uses: actions/checkout@v4
+        with:
+          repository: krisbiradar/Genreport.Frontend # TODO: Update exact repo name
+          path: external_repos/frontend
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }} # Or a PAT if repos are private
+
+      - name: Checkout Backend Repo
+        uses: actions/checkout@v4
+        with:
+          repository: krisbiradar/Genreport.Backend # TODO: Update exact repo name
+          path: external_repos/backend
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout Go Service Repo
+        uses: actions/checkout@v4
+        with:
+          repository: krisbiradar/Genreport.GoService # TODO: Update exact repo name
+          path: external_repos/go
+          ref: master
+          token: ${{ secrets.GITHUB_TOKEN }}
+
       - uses: actions/download-artifact@v4
         with:
           name: configwriter-darwin-arm64   # swap for amd64 or use a universal binary
@@ -96,7 +122,18 @@ jobs:
       - name: Make scripts executable
         run: chmod +x mac/pkg_scripts/preinstall mac/pkg_scripts/postinstall
 
-      # TODO: copy launcher, ollama, rabbitmq, web, dotnet publish into payload/
+      - name: Prepare macOS Payload
+        run: |
+          mkdir -p payload
+          # Copy the configwriter and rename it so postinstall finds it
+          cp publish/configwriter-darwin-arm64 payload/configwriter
+          chmod +x payload/configwriter
+          
+          # Copy the launch daemon plist
+          cp mac/com.genreport.launcher.plist payload/
+          
+          # TODO: Build projects from external_repos/ and copy into payload/ here...
+          # cp -r external_repos/frontend/dist payload/web
 
       - name: Build .pkg
         run: |
@@ -104,7 +141,7 @@ jobs:
             --root payload/ \
             --scripts mac/pkg_scripts \
             --identifier com.genreport.installer \
-            --version "${GITHUB_REF_NAME}" \
+            --version "1.0.0-${GITHUB_SHA::7}" \
             --install-location /Applications/Genreport \
             Genreport.pkg
 
