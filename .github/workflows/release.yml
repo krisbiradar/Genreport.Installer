@@ -93,7 +93,7 @@ jobs:
       - name: Checkout Frontend Repo
         uses: actions/checkout@v4
         with:
-          repository: krisbiradar/Genreport.Frontend # TODO: Update exact repo name
+          repository: krisbiradar/GenReport.ClientWebsite
           path: external_repos/frontend
           ref: master
           token: ${{ secrets.GITHUB_TOKEN }} # Or a PAT if repos are private
@@ -101,7 +101,7 @@ jobs:
       - name: Checkout Backend Repo
         uses: actions/checkout@v4
         with:
-          repository: krisbiradar/Genreport.Backend # TODO: Update exact repo name
+          repository: krisbiradar/GenReport
           path: external_repos/backend
           ref: master
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -109,7 +109,7 @@ jobs:
       - name: Checkout Go Service Repo
         uses: actions/checkout@v4
         with:
-          repository: krisbiradar/Genreport.GoService # TODO: Update exact repo name
+          repository: krisbiradar/GenReport.Go
           path: external_repos/go
           ref: master
           token: ${{ secrets.GITHUB_TOKEN }}
