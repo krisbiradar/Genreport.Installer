@@ -72,10 +72,25 @@ R2_SECRET=$(ask "R2 Secret Key:" "" "true")
 R2_URL=$(ask "R2 Public URL:" "")
 
 # ── Page 5: Security keys ─────────────────────────────────────────────────────────
-banner "Step 5 of 5 — Security keys\n\nLeave as \"(auto-generate)\" to have the installer create strong random 256-bit keys.\n\nEnter custom values only when migrating an existing installation."
+banner "Step 5 of 5 — Security keys\n\nLeave as '(auto-generate)' to have the installer create strong random 256-bit keys.\n\nEnter custom values only when migrating an existing installation."
 
 JWT_SECRET=$(ask "JWT signing secret (leave as-is to auto-generate):" "(auto-generate)" "true")
 ENCRYPTION_KEY=$(ask "Encryption master key (leave as-is to auto-generate):" "(auto-generate)" "true")
+
+# ── Check for Ollama ─────────────────────────────────────────────────────────
+OLLAMA_INSTALL="skip"
+if ! command -v ollama &> /dev/null; then
+  WANT_OLLAMA=$(osascript -e "
+    set result to display dialog \"Ollama is not installed but is strongly recommended for local AI features. Do you want to install Ollama?\" \
+      with title \"Genreport Setup\" \
+      buttons {\"No, skip\", \"Yes, install Ollama\"} default button 2
+    return button returned of result")
+  if [ "$WANT_OLLAMA" = "Yes, install Ollama" ]; then
+    OLLAMA_INSTALL="yes"
+  fi
+else
+  OLLAMA_INSTALL="already_installed"
+fi
 
 # ── Write temp config for postinstall ─────────────────────────────────────────
 cat > /tmp/genreport_install_config <<EOF
@@ -97,6 +112,7 @@ R2_SECRET="$R2_SECRET"
 R2_URL="$R2_URL"
 JWT_SECRET="$JWT_SECRET"
 ENCRYPTION_KEY="$ENCRYPTION_KEY"
+OLLAMA_INSTALL="$OLLAMA_INSTALL"
 EOF
 
 chmod 600 /tmp/genreport_install_config

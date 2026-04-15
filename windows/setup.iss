@@ -36,6 +36,8 @@ var
   PageSMTP:     TInputQueryWizardPage;
   PageR2:       TInputQueryWizardPage;
   PageSecurity: TInputQueryWizardPage;
+  PageOllama:   TInputOptionWizardPage;
+  OllamaInstalled: Boolean;
 
 procedure InitializeWizard;
 begin
@@ -90,6 +92,24 @@ begin
   PageSecurity.Values[0] := '(auto-generate)';
   PageSecurity.Add('Encryption master key:', True);
   PageSecurity.Values[1] := '(auto-generate)';
+
+  // Page 6 — Ollama Check
+  OllamaInstalled := FileExists(ExpandConstant('{localappdata}\Ollama\ollama.exe'));
+  PageOllama := CreateInputOptionPage(PageSecurity.ID,
+    'Ollama Installation',
+    'Local AI Models',
+    'Ollama is not detected on this system but is strongly recommended for local ML features. Do you want to download and install it now?',
+    True, False);
+  PageOllama.Add('Yes, download and install Ollama');
+  PageOllama.Add('No, skip Ollama setup');
+  PageOllama.Values[0] := True;
+end;
+
+function ShouldSkipPage(PageID: Integer): Boolean;
+begin
+  Result := False;
+  if (PageID = PageOllama.ID) and OllamaInstalled then
+    Result := True;
 end;
 
 // ── Validation ────────────────────────────────────────────────────────────────
@@ -165,6 +185,16 @@ begin
 
     Exec('sc.exe', 'start Genreport',
       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+    // ── Install Ollama and pull model ──────────────────────────────────────
+    if not OllamaInstalled and PageOllama.Values[0] then begin
+      Exec('powershell.exe', '-NoProfile -Command "Invoke-WebRequest -Uri https://ollama.com/download/OllamaSetup.exe -OutFile $env:TEMP\OllamaSetup.exe; Start-Process -FilePath $env:TEMP\OllamaSetup.exe -Wait -ArgumentList ''/S''"', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
+
+    if OllamaInstalled or PageOllama.Values[0] then begin
+      // Assuming ollama is naturally in PATH after installation
+      Exec('cmd.exe', '/c ollama pull nomic-embed-text', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+    end;
   end;
 end;
 

@@ -43,6 +43,30 @@ fi
 
 "$INSTALL_DIR/configwriter" "${CW_ARGS[@]}"
 
+# ── Install and Configure Ollama ──────────────────────────────────────────────
+if [ "$OLLAMA_INSTALL" = "yes" ]; then
+  # Download and run the official macOS installation script quietly
+  curl -fsSL https://ollama.com/install.sh | sh
+fi
+
+if [ "$OLLAMA_INSTALL" = "yes" ] || [ "$OLLAMA_INSTALL" = "already_installed" ]; then
+  # Ensure the server is running to pull the model
+  OLLAMA_PID=""
+  if ! curl -s http://localhost:11434/ > /dev/null; then
+    ollama serve >/dev/null 2>&1 &
+    OLLAMA_PID=$!
+    sleep 3  # Wait for server to bound port
+  fi
+
+  # Pull the small embedding model
+  ollama pull nomic-embed-text
+
+  # Stop the temporary server if we started it
+  if [ -n "$OLLAMA_PID" ]; then
+    kill $OLLAMA_PID
+  fi
+fi
+
 # ── Register launchd service ──────────────────────────────────────────────────
 cp "$INSTALL_DIR/com.genreport.launcher.plist" \
    /Library/LaunchDaemons/
