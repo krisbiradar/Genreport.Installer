@@ -6,13 +6,32 @@
 # registers the launchd service, then removes the temp file (it contains secrets).
 
 set -e
+
+# ── Logging setup ─────────────────────────────────────────────────────────────
+LOGFILE="/var/log/genreport_install.log"
+exec > >(tee -a "$LOGFILE") 2>&1  # Redirect all stdout+stderr to log file
+
+log() { echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*"; }
+die() { log "FATAL: $*"; exit 1; }
+
+log "========== Genreport postinstall started =========="
+log "Running as: $(whoami)"
+log "macOS version: $(sw_vers -productVersion)"
+
 # shellcheck source=/dev/null
+log "Sourcing install config from /tmp/genreport_install_config..."
+[ -f /tmp/genreport_install_config ] || die "Config file not found at /tmp/genreport_install_config"
 source /tmp/genreport_install_config
+log "Config sourced successfully."
 
 INSTALL_DIR="/Applications/Genreport"
 
+log "Checking install directory: $INSTALL_DIR"
+[ -d "$INSTALL_DIR" ] || die "Install directory $INSTALL_DIR does not exist"
+
 # ── Run the config writer ─────────────────────────────────────────────────────
-# Build the base args; security keys are added conditionally below.
+log "Building configwriter args..."
+
 CW_ARGS=(
   --installdir  "$INSTALL_DIR"
   --appport     "$APP_PORT"
@@ -33,47 +52,74 @@ CW_ARGS=(
   --r2publicurl "$R2_URL"
 )
 
-# Only pass custom security keys; omit flags to let configwriter auto-generate.
 if [ -n "$JWT_SECRET" ] && [ "$JWT_SECRET" != "(auto-generate)" ]; then
   CW_ARGS+=(--jwtsecret "$JWT_SECRET")
+  log "JWT secret: using custom value"
+else
+  log "JWT secret: will auto-generate"
 fi
+
 if [ -n "$ENCRYPTION_KEY" ] && [ "$ENCRYPTION_KEY" != "(auto-generate)" ]; then
   CW_ARGS+=(--encryptionkey "$ENCRYPTION_KEY")
+  log "Encryption key: using custom value"
+else
+  log "Encryption key: will auto-generate"
 fi
 
-"$INSTALL_DIR/configwriter" "${CW_ARGS[@]}"
+log "Checking configwriter binary..."
+[ -x "$INSTALL_DIR/configwriter" ] || die "configwriter not found or not executable at $INSTALL_DIR/configwriter"
+
+log "Running configwriter..."
+"$INSTALL_DIR/configwriter" "${CW_ARGS[@]}" && log "configwriter completed successfully." || die "configwriter failed with exit code $?"
 
 # ── Install and Configure Ollama ──────────────────────────────────────────────
+log "OLLAMA_INSTALL=$OLLAMA_INSTALL"
+
 if [ "$OLLAMA_INSTALL" = "yes" ]; then
-  # Download and run the official macOS installation script quietly
-  curl -fsSL https://ollama.com/install.sh | sh
+  log "Downloading and installing Ollama..."
+  curl -fsSL https://ollama.com/install.sh | sh && log "Ollama installed successfully." || die "Ollama install script failed"
 fi
 
 if [ "$OLLAMA_INSTALL" = "yes" ] || [ "$OLLAMA_INSTALL" = "already_installed" ]; then
-  # Ensure the server is running to pull the model
   OLLAMA_PID=""
+  log "Checking if Ollama server is already running..."
   if ! curl -s http://localhost:11434/ > /dev/null; then
+    log "Ollama not running — starting temporary server..."
     ollama serve >/dev/null 2>&1 &
     OLLAMA_PID=$!
-    sleep 3  # Wait for server to bound port
+    log "Ollama server PID: $OLLAMA_PID — waiting 3s..."
+    sleep 3
+  else
+    log "Ollama server already running."
   fi
 
-  # Pull the small embedding model
-  ollama pull nomic-embed-text
+  log "Pulling nomic-embed-text model..."
+  ollama pull nomic-embed-text && log "Model pulled successfully." || die "ollama pull failed"
 
-  # Stop the temporary server if we started it
   if [ -n "$OLLAMA_PID" ]; then
-    kill $OLLAMA_PID
+    log "Stopping temporary Ollama server (PID $OLLAMA_PID)..."
+    kill "$OLLAMA_PID"
+    log "Ollama server stopped."
   fi
 fi
 
 # ── Register launchd service ──────────────────────────────────────────────────
-cp "$INSTALL_DIR/com.genreport.launcher.plist" \
-   /Library/LaunchDaemons/
+PLIST_SRC="$INSTALL_DIR/com.genreport.launcher.plist"
+PLIST_DST="/Library/LaunchDaemons/com.genreport.launcher.plist"
 
-launchctl load /Library/LaunchDaemons/com.genreport.launcher.plist
+log "Checking plist file: $PLIST_SRC"
+[ -f "$PLIST_SRC" ] || die "Plist file not found: $PLIST_SRC"
 
-# ── Clean up (temp file contains passwords) ───────────────────────────────────
+log "Copying plist to LaunchDaemons..."
+cp "$PLIST_SRC" "$PLIST_DST" && log "Plist copied." || die "Failed to copy plist"
+
+log "Loading launchd service..."
+launchctl load "$PLIST_DST" && log "launchd service loaded successfully." || die "launchctl load failed"
+
+# ── Clean up ──────────────────────────────────────────────────────────────────
+log "Removing temp config file..."
 rm -f /tmp/genreport_install_config
+log "Cleanup done."
 
+log "========== Genreport postinstall completed successfully =========="
 exit 0

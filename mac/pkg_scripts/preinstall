@@ -49,9 +49,46 @@ DB_USER=$(ask "Database username:" "postgres")
 DB_PASS=$(ask "Database password:" "" "true")
 
 # ── Page 2: Application port ──────────────────────────────────────────────────
-banner "Step 2 of 4 — Application port\n\nGenreport will be accessible at http://localhost:[port]\n\nAll internal services are managed automatically.\nChange the port only if 2905 is already in use."
+# Auto-detect a free port starting at 2905
+find_free_port() {
+  local port="${1:-2905}"
+  while lsof -iTCP:"$port" -sTCP:LISTEN -t &>/dev/null 2>&1; do
+    port=$((port + 1))
+  done
+  echo "$port"
+}
 
-APP_PORT=$(ask "Application port:" "2905")
+DEFAULT_PORT=2905
+AUTO_PORT=$(find_free_port "$DEFAULT_PORT")
+
+if [ "$AUTO_PORT" -ne "$DEFAULT_PORT" ]; then
+  PORT_MSG="Port $DEFAULT_PORT is already in use.\\nGenreport will use port $AUTO_PORT instead.\\n\\nClick 'Use $AUTO_PORT' to accept, or 'Override' to enter a different port."
+else
+  PORT_MSG="Genreport will run on port $AUTO_PORT.\\n\\nClick 'Use $AUTO_PORT' to accept, or 'Override' to enter a different port."
+fi
+
+PORT_CHOICE=$(osascript -e "
+  set result to display dialog \"$PORT_MSG\" \\
+    with title \"Genreport Setup — Application Port\" \\
+    buttons {\"Override\", \"Use $AUTO_PORT\"} default button \"Use $AUTO_PORT\"
+  return button returned of result")
+
+if [ "$PORT_CHOICE" = "Override" ]; then
+  USER_PORT=$(ask "Enter a custom port number:" "$AUTO_PORT")
+  # Validate user-supplied port
+  if [[ ! "$USER_PORT" =~ ^[0-9]+$ ]] || [ "$USER_PORT" -lt 1024 ] || [ "$USER_PORT" -gt 65535 ]; then
+    osascript -e "display dialog \"Invalid port '$USER_PORT'. Falling back to $AUTO_PORT.\" with title \"Genreport Setup\" buttons {\"OK\"} default button 1" > /dev/null
+    APP_PORT="$AUTO_PORT"
+  else
+    # Check if the user's chosen port is free too
+    APP_PORT=$(find_free_port "$USER_PORT")
+    if [ "$APP_PORT" -ne "$USER_PORT" ]; then
+      osascript -e "display dialog \"Port $USER_PORT is also in use. Using next free port: $APP_PORT.\" with title \"Genreport Setup\" buttons {\"OK\"} default button 1" > /dev/null
+    fi
+  fi
+else
+  APP_PORT="$AUTO_PORT"
+fi
 
 # ── Page 3: SMTP ──────────────────────────────────────────────────────────────
 banner "Step 3 of 4 — Email (SMTP)\n\nOutbound email settings. Leave blank to configure later."
