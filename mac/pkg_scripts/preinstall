@@ -112,28 +112,39 @@ if [ "$POSTGRES_SOURCE" = "external" ]; then
   # ── Connection test retry loop ──────────────────────────────────────────────
   # Note: we connect to the 'postgres' system db — the target DB ($DB_NAME)
   # may not exist yet (Genreport creates it on first launch). That's fine.
+  #
+  # Error messages are written to a temp file and read by AppleScript via
+  # 'do shell script "cat ..."' — this avoids all bash→AppleScript quoting
+  # issues (psql errors routinely contain literal " characters such as:
+  #   connection to server at "localhost" (127.0.0.1) failed).
+  CONN_ERR_FILE="/tmp/genreport_conn_error.txt"
+
   while true; do
-    CONN_ERROR=""
+    rm -f "$CONN_ERR_FILE"
 
     if ! nc -z -w5 "$DB_HOST" "$DB_PORT" &>/dev/null 2>&1; then
-      CONN_ERROR="Cannot reach a PostgreSQL server at ${DB_HOST}:${DB_PORT}.\\n\\nMake sure the server is running and the host \\ port are correct."
+      printf 'Cannot reach a PostgreSQL server at %s:%s.\n\nMake sure the server is running and the host/port are correct.' \
+        "$DB_HOST" "$DB_PORT" > "$CONN_ERR_FILE"
     else
-      # Port is open — test authentication
+      # Port is open — test authentication against the 'postgres' system db
       AUTH_OUT=$(PGPASSWORD="$DB_PASS" psql \
         -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
-        -d postgres -c "\\q" 2>&1)
+        -d postgres -c "\q" 2>&1)
       AUTH_CODE=$?
       if [ "$AUTH_CODE" -eq 0 ]; then
         DB_TESTED="yes"
+        rm -f "$CONN_ERR_FILE"
         break
       else
-        FIRST_LINE=$(echo "$AUTH_OUT" | head -1 | sed "s/'/\\''/g")
-        CONN_ERROR="Reached ${DB_HOST}:${DB_PORT} but authentication failed.\\n\\n$FIRST_LINE"
+        # Write the raw psql error — no escaping needed, AppleScript reads the file
+        printf 'Reached %s:%s but authentication failed.\n\n%s' \
+          "$DB_HOST" "$DB_PORT" "$(echo "$AUTH_OUT" | head -3)" > "$CONN_ERR_FILE"
       fi
     fi
 
     RETRY_CHOICE=$(osascript -e "
-      set result to display dialog \"Could not connect to PostgreSQL.\\n\\n$CONN_ERROR\\n\\nWhat would you like to do?\" \\
+      set errMsg to do shell script \"cat /tmp/genreport_conn_error.txt\"
+      set result to display dialog \"Could not connect to PostgreSQL.\" & return & return & errMsg & return & return & \"What would you like to do?\" \\
         with title \"Genreport Setup — Connection Failed\" \\
         buttons {\"Continue Anyway\", \"Edit Credentials\", \"Retry\"} default button 3
       return button returned of result")
@@ -156,6 +167,7 @@ if [ "$POSTGRES_SOURCE" = "external" ]; then
     fi
     # else: Retry — loop again with same credentials
   done
+  rm -f "$CONN_ERR_FILE"
 fi
 
 # ── Page 2: Application port ──────────────────────────────────────────────────
