@@ -62,25 +62,39 @@ if [ "$POSTGRES_INSTALL" = "yes" ]; then
     [ "$CONSOLE_USER" = "root" ] && log "Console user is root — skipping Homebrew path."
   fi
 
-  # ── Option 2: Bundled EDB installer ─────────────────────────────────────────
+  # ── Option 2: Bundled Postgres.app (Homebrew not available) ─────────────────
   if [ "$PG_INSTALLED" = "false" ]; then
-    EDB_INSTALLER="$INSTALL_DIR/postgresql-17-installer.run"
-    log "Looking for bundled EDB installer at: $EDB_INSTALLER"
-    [ -f "$EDB_INSTALLER" ] || die "EDB PostgreSQL installer not found in $INSTALL_DIR. Reinstall the package."
+    PGAPP="$INSTALL_DIR/Postgres.app"
+    log "Looking for bundled Postgres.app at: $PGAPP"
+    [ -d "$PGAPP" ] || die "Postgres.app not found in $INSTALL_DIR and Homebrew unavailable. Reinstall package."
 
-    log "Running EDB PostgreSQL 17 installer (headless)..."
-    chmod +x "$EDB_INSTALLER"
-    "$EDB_INSTALLER" \
-      --mode unattended \
-      --superpassword "$DB_PASS" \
-      --serverport "$DB_PORT" \
-      --prefix /Library/PostgreSQL/17 \
-      --datadir /Library/PostgreSQL/17/data \
-      --enable-components server,commandlinetools \
-      && log "PostgreSQL installed via EDB." \
-      || die "EDB PostgreSQL installation failed."
+    log "Installing Postgres.app into /Applications..."
+    cp -r "$PGAPP" /Applications/Postgres.app \
+      && log "Postgres.app copied to /Applications." \
+      || die "Failed to copy Postgres.app to /Applications."
 
-    PG_BIN_DIR="/Library/PostgreSQL/17/bin"
+    # Register pg CLI tools on the system PATH
+    PG_BIN_DIR=$(find /Applications/Postgres.app/Contents/Versions -maxdepth 1 -type d -name "17" 2>/dev/null | head -1)/bin
+    if [ ! -d "$PG_BIN_DIR" ]; then
+      # Fallback: any version directory present
+      PG_BIN_DIR=$(find /Applications/Postgres.app/Contents/Versions -maxdepth 2 -name "psql" 2>/dev/null | head -1 | xargs dirname) || true
+    fi
+    [ -d "$PG_BIN_DIR" ] || die "Could not locate pg binaries inside Postgres.app."
+
+    # Initialise and start the PostgreSQL cluster via the app's helper
+    PGAPP_HELPER="/Applications/Postgres.app/Contents/MacOS/Postgres"
+    if [ -x "$PGAPP_HELPER" ]; then
+      log "Starting Postgres.app server..."
+      open -a /Applications/Postgres.app
+      sleep 5  # Give the server time to initialise
+    else
+      log "Starting PostgreSQL directly via pg_ctl..."
+      PGDATA="$HOME/Library/Application Support/Postgres/var-17"
+      mkdir -p "$PGDATA"
+      "$PG_BIN_DIR/initdb" -D "$PGDATA" -E UTF-8 &>/dev/null || true
+      "$PG_BIN_DIR/pg_ctl" -D "$PGDATA" -l /var/log/genreport_pg.log start || die "pg_ctl start failed"
+    fi
+
     PG_INSTALLED=true
   fi
 
@@ -101,27 +115,47 @@ if [ "$POSTGRES_INSTALL" = "yes" ]; then
   [ "$PG_READY" = "true" ] || die "PostgreSQL did not become ready within 30 seconds."
 
   # ── Ensure 'postgres' superuser role exists with the configured password ─────
-  # Homebrew installs create a cluster owned by the macOS user (not 'postgres').
-  # We create/alter the postgres role so Genreport can always use it.
+  # SECURITY: $DB_PASS is NEVER interpolated into SQL text.
+  # We use psql's -v flag to pass the password as a named variable, then
+  # reference it as :'pass' (a properly-quoted string literal). This means
+  # passwords containing single-quotes, backslashes, or any special chars
+  # are handled safely by the psql driver, not the shell.
   log "Configuring postgres superuser role and password..."
-  SETUP_SQL="DO \$\$ BEGIN
-    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgres') THEN
-      CREATE ROLE postgres SUPERUSER LOGIN PASSWORD '$DB_PASS';
-    ELSE
-      ALTER ROLE postgres SUPERUSER LOGIN PASSWORD '$DB_PASS';
-    END IF;
-  END \$\$;"
 
-  # Attempt as postgres user first (EDB path), then as console user (Homebrew path)
-  if ! ( PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres -c "$SETUP_SQL" &>/dev/null 2>&1 ); then
-    if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
-      sudo -u "$CONSOLE_USER" psql -d postgres -c "$SETUP_SQL" \
-        && log "postgres role configured via console user." \
-        || log "Warning: could not configure postgres role — manual setup may be needed."
-    fi
-  else
-    log "postgres role configured successfully."
+  _apply_pg_role_sql() {
+    # $@ = psql command prefix (connection flags)
+    # Step 1: create the role if it doesn't exist (no password in SQL)
+    "$@" -d postgres -c \
+      "DO \$\$ BEGIN
+         IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgres') THEN
+           CREATE ROLE postgres SUPERUSER LOGIN;
+         END IF;
+       END \$\$;" 2>/dev/null || return 1
+    # Step 2: set/update the password — :'pass' is a psql-quoted string literal
+    "$@" -d postgres -v "pass=$DB_PASS" -c \
+      "ALTER ROLE postgres SUPERUSER LOGIN PASSWORD :'pass';" 2>/dev/null
+  }
+
+  PG_ROLE_OK=false
+  # Try first as postgres (EDB / preexisting installs)
+  if PGPASSWORD="$DB_PASS" _apply_pg_role_sql psql -h "$DB_HOST" -p "$DB_PORT" -U postgres 2>/dev/null; then
+    log "postgres role configured successfully (postgres user path)."
+    PG_ROLE_OK=true
   fi
+
+  # Homebrew path: cluster is owned by the console user, no postgres role yet
+  if [ "$PG_ROLE_OK" = "false" ] && [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+    if sudo -u "$CONSOLE_USER" bash -c "
+      _apply_pg_role_sql() { \"\$@\" -d postgres -c \"DO \\\$\\\$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgres') THEN CREATE ROLE postgres SUPERUSER LOGIN; END IF; END \\\$\\\$;\" 2>/dev/null || return 1; \"\$@\" -d postgres -v \"pass=$DB_PASS\" -c \"ALTER ROLE postgres SUPERUSER LOGIN PASSWORD :'pass';\"; }
+      _apply_pg_role_sql psql
+    "; then
+      log "postgres role configured successfully (console user path)."
+      PG_ROLE_OK=true
+    fi
+  fi
+
+  [ "$PG_ROLE_OK" = "true" ] \
+    || log "Warning: could not configure postgres role — it may need to be set manually."
 fi
 
 # ── Run the config writer ─────────────────────────────────────────────────────

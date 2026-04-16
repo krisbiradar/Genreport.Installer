@@ -21,45 +21,56 @@ cp publish/configwriter-darwin-arm64 payload/configwriter
 chmod +x payload/configwriter
 cp mac/com.genreport.launcher.plist payload/
 
-# ── Bundle EDB PostgreSQL 17 installer (fallback if Homebrew is unavailable) ──
-# The postinstall script will use this only when Homebrew is not found.
-# To update the PostgreSQL version, replace the URL below.
-# Latest macOS installers: https://www.enterprisedb.com/downloads/postgres-postgresql-downloads
+# ── Bundle Postgres.app (PostgreSQL 17 for macOS, fallback if Homebrew absent) ──
+# Postgres.app is a self-contained macOS application that includes pg client
+# tools (psql, pg_isready, etc.) and a full PostgreSQL 17 server.
+# Its GitHub release URLs are stable and versioned — safe to use in CI.
 #
-# ARM64 (Apple Silicon) — PostgreSQL 17
-EDB_MAC_URL="https://sbp.enterprisedb.com/getfile.jsp?fileid=1258893"
-EDB_DMG="/tmp/pg17_edb_installer.dmg"
-EDB_MOUNT="/tmp/pg17_edb_mount"
+# Resolve the latest Postgres.app v17-only DMG URL dynamically:
+echo "==> Resolving latest Postgres.app v17 release URL..."
+PGAPP_DMG_URL=$(curl -fsSL https://api.github.com/repos/PostgresApp/PostgresApp/releases/latest \
+  | python3 -c "
+import json, sys
+assets = json.load(sys.stdin)['assets']
+# Pick the single-version PG17 DMG (smallest download, no extra versions)
+for a in assets:
+    if a['name'].endswith('-17.dmg'):
+        print(a['browser_download_url'])
+        break
+") || true
 
-echo "==> Downloading EDB PostgreSQL 17 installer for macOS (ARM64)..."
-curl -fSL --progress-bar -o "$EDB_DMG" "$EDB_MAC_URL" \
-  || { echo "⚠️  WARNING: EDB download failed. Installer will rely on Homebrew only."; EDB_SKIP=1; }
-
-if [ "${EDB_SKIP:-0}" -eq 0 ]; then
-  echo "==> Extracting EDB installer from DMG..."
-  hdiutil attach "$EDB_DMG" -mountpoint "$EDB_MOUNT" -nobrowse -quiet
-
-  # The EDB macOS DMG contains a .run (Linux-style) or .app installer.
-  # Copy whichever is present into the payload as a known filename.
-  EDB_RUN=$(find "$EDB_MOUNT" -maxdepth 2 -name "*.run" | head -1)
-  if [ -n "$EDB_RUN" ]; then
-    cp "$EDB_RUN" payload/postgresql-17-installer.run
-    chmod +x payload/postgresql-17-installer.run
-    echo "==> EDB .run installer bundled: $(basename "$EDB_RUN")"
-  else
-    EDB_APP=$(find "$EDB_MOUNT" -maxdepth 2 -name "*.app" | head -1)
-    if [ -n "$EDB_APP" ]; then
-      cp -r "$EDB_APP" payload/postgresql-17-installer.app
-      echo "==> EDB .app installer bundled: $(basename "$EDB_APP")"
-    else
-      echo "⚠️  WARNING: Could not find installer inside EDB DMG — skipping bundling."
-    fi
-  fi
-
-  hdiutil detach "$EDB_MOUNT" -quiet
-  rm -f "$EDB_DMG"
+if [ -z "$PGAPP_DMG_URL" ]; then
+  echo "⚠️  WARNING: Could not resolve Postgres.app download URL. Installer will rely on Homebrew only."
+  PGAPP_SKIP=1
 fi
 
+if [ "${PGAPP_SKIP:-0}" -eq 0 ]; then
+  PGAPP_DMG="/tmp/Postgres-17.dmg"
+  PGAPP_MOUNT="/tmp/PostgresApp_mount"
+
+  echo "==> Downloading Postgres.app: $PGAPP_DMG_URL"
+  curl -fSL --progress-bar -o "$PGAPP_DMG" "$PGAPP_DMG_URL" \
+    || { echo "⚠️  WARNING: Postgres.app download failed. Installer will rely on Homebrew only."; PGAPP_SKIP=1; }
+fi
+
+if [ "${PGAPP_SKIP:-0}" -eq 0 ]; then
+  echo "==> Mounting Postgres.app DMG..."
+  hdiutil attach "$PGAPP_DMG" -mountpoint "$PGAPP_MOUNT" -nobrowse -quiet \
+    || { echo "⚠️  WARNING: Could not mount Postgres.app DMG."; PGAPP_SKIP=1; }
+fi
+
+if [ "${PGAPP_SKIP:-0}" -eq 0 ]; then
+  PGAPP_SRC=$(find "$PGAPP_MOUNT" -maxdepth 1 -name "*.app" | head -1)
+  if [ -n "$PGAPP_SRC" ]; then
+    echo "==> Bundling $(basename "$PGAPP_SRC") into payload..."
+    cp -r "$PGAPP_SRC" payload/Postgres.app
+    echo "==> Postgres.app bundled successfully."
+  else
+    echo "⚠️  WARNING: .app not found in Postgres DMG — skipping."
+  fi
+  hdiutil detach "$PGAPP_MOUNT" -quiet
+  rm -f "$PGAPP_DMG"
+fi
 
 # -----------------------------------------------------------------------------
 # TODO: Add your build commands for the 3 cloned repos here!
