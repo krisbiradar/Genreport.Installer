@@ -126,11 +126,14 @@ if [ "$POSTGRES_SOURCE" = "external" ]; then
       printf 'Cannot reach a PostgreSQL server at %s:%s.\n\nMake sure the server is running and the host/port are correct.' \
         "$DB_HOST" "$DB_PORT" > "$CONN_ERR_FILE"
     else
-      # Port is open — test authentication against the 'postgres' system db
+      # Port is open — test authentication against the 'postgres' system db.
+      # IMPORTANT: use '|| AUTH_CODE=$?' on the same line as the $() assignment.
+      # Under set -e, a failing subshell inside $() exits the script immediately
+      # if the assignment itself returns non-zero — AUTH_CODE=$? would never run.
+      AUTH_CODE=0
       AUTH_OUT=$(PGPASSWORD="$DB_PASS" psql \
         -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
-        -d postgres -c "\q" 2>&1)
-      AUTH_CODE=$?
+        -d postgres -c "\q" 2>&1) || AUTH_CODE=$?
       if [ "$AUTH_CODE" -eq 0 ]; then
         DB_TESTED="yes"
         rm -f "$CONN_ERR_FILE"
@@ -142,12 +145,15 @@ if [ "$POSTGRES_SOURCE" = "external" ]; then
       fi
     fi
 
+    # Guard with || true: if osascript exits non-zero (e.g. dialog force-closed),
+    # RETRY_CHOICE is empty and the if-chain falls through → loop retries safely.
     RETRY_CHOICE=$(osascript -e "
       set errMsg to do shell script \"cat /tmp/genreport_conn_error.txt\"
       set result to display dialog \"Could not connect to PostgreSQL.\" & return & return & errMsg & return & return & \"What would you like to do?\" \\
         with title \"Genreport Setup — Connection Failed\" \\
         buttons {\"Continue Anyway\", \"Edit Credentials\", \"Retry\"} default button 3
-      return button returned of result")
+      return button returned of result") || true
+
 
     if [ "$RETRY_CHOICE" = "Continue Anyway" ]; then
       break
