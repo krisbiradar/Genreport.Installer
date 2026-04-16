@@ -39,14 +39,124 @@ banner() {
       buttons {\"Continue\"} default button 1" > /dev/null
 }
 
-# ── Page 1: Database ──────────────────────────────────────────────────────────
-banner "Step 1 of 4 — Database configuration\n\nWARNING: If the database already exists it will be overwritten. Choose the name carefully! (Attach DB support will come later).\n\nEnter your PostgreSQL connection details."
+# ── Step 1: PostgreSQL Detection & Database Setup ────────────────────────────
+POSTGRES_INSTALL="no"
+POSTGRES_SOURCE="external"
+DB_TESTED="no"
 
-DB_HOST=$(ask "Database host:" "localhost")
-DB_PORT=$(ask "Database port:" "5432")
-DB_NAME=$(ask "Database name:" "genreport")
-DB_USER=$(ask "Database username:" "postgres")
-DB_PASS=$(ask "Database password:" "" "true")
+# Detect PostgreSQL: check common binary locations or if port 5432 is listening
+_pg_detect() {
+  command -v psql &>/dev/null && return 0
+  command -v pg_isready &>/dev/null && return 0
+  for p in \
+      "/opt/homebrew/opt/postgresql@17/bin" \
+      "/opt/homebrew/opt/postgresql@16/bin" \
+      "/usr/local/opt/postgresql@17/bin" \
+      "/usr/local/opt/postgresql@16/bin"; do
+    [ -x "$p/psql" ] && export PATH="$p:$PATH" && return 0
+  done
+  for p in /Library/PostgreSQL/*/bin; do
+    [ -x "$p/psql" ] && export PATH="$p:$PATH" && return 0
+  done
+  # Fall back to a raw TCP probe on the default pg port
+  nc -z -w3 localhost 5432 &>/dev/null 2>&1 && return 0
+  return 1
+}
+
+if ! _pg_detect; then
+  PG_CHOICE=$(osascript -e "
+    set result to display dialog \"PostgreSQL was not detected on this Mac.\\n\\nGenreport requires PostgreSQL to store its data.\\n\\nThe installer can automatically download and install PostgreSQL 17 for you, or you can point it at an existing server.\" \\
+      with title \"Genreport Setup — Database\" \\
+      buttons {\"I Have My Own Server\", \"Install PostgreSQL (Recommended)\"} default button 2
+    return button returned of result")
+
+  if [ "$PG_CHOICE" = "Install PostgreSQL (Recommended)" ]; then
+    POSTGRES_INSTALL="yes"
+    POSTGRES_SOURCE="managed"
+    # Managed install uses fixed defaults; only ask DB name + mandatory password
+    DB_HOST="localhost"
+    DB_PORT="5432"
+    DB_USER="postgres"
+    DB_NAME=$(ask "Database name:" "genreport")
+    DB_PASS=""
+    while [ -z "$DB_PASS" ]; do
+      DB_PASS=$(ask "PostgreSQL superuser password (required — cannot be empty):" "" "true")
+      if [ -z "$DB_PASS" ]; then
+        osascript -e "display dialog \"A password is required for the postgres superuser.\\nPlease enter one.\" \\
+          with title \"Genreport Setup\" buttons {\"OK\"} default button 1" > /dev/null
+      fi
+    done
+  fi
+  # If user chose 'I Have My Own Server', POSTGRES_SOURCE remains 'external'
+fi
+
+# ── Collect external DB credentials + test connection ─────────────────────────
+if [ "$POSTGRES_SOURCE" = "external" ]; then
+  banner "Step 1 of 5 — Database configuration\n\nWARNING: If the database already exists it will be overwritten.\n\nEnter your PostgreSQL connection details. The installer will verify the connection before proceeding."
+
+  DB_HOST=$(ask "Database host:" "localhost")
+  DB_PORT=$(ask "Database port:" "5432")
+  DB_NAME=$(ask "Database name:" "genreport")
+  DB_USER=$(ask "Database username:" "postgres")
+
+  # Mandatory password
+  DB_PASS=""
+  while [ -z "$DB_PASS" ]; do
+    DB_PASS=$(ask "Database password (required):" "" "true")
+    if [ -z "$DB_PASS" ]; then
+      osascript -e "display dialog \"A database password is required.\\nPlease enter one.\" \\
+        with title \"Genreport Setup\" buttons {\"OK\"} default button 1" > /dev/null
+    fi
+  done
+
+  # ── Connection test retry loop ──────────────────────────────────────────────
+  # Note: we connect to the 'postgres' system db — the target DB ($DB_NAME)
+  # may not exist yet (Genreport creates it on first launch). That's fine.
+  while true; do
+    CONN_ERROR=""
+
+    if ! nc -z -w5 "$DB_HOST" "$DB_PORT" &>/dev/null 2>&1; then
+      CONN_ERROR="Cannot reach a PostgreSQL server at ${DB_HOST}:${DB_PORT}.\\n\\nMake sure the server is running and the host \\ port are correct."
+    else
+      # Port is open — test authentication
+      AUTH_OUT=$(PGPASSWORD="$DB_PASS" psql \
+        -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
+        -d postgres -c "\\q" 2>&1)
+      AUTH_CODE=$?
+      if [ "$AUTH_CODE" -eq 0 ]; then
+        DB_TESTED="yes"
+        break
+      else
+        FIRST_LINE=$(echo "$AUTH_OUT" | head -1 | sed "s/'/\\''/g")
+        CONN_ERROR="Reached ${DB_HOST}:${DB_PORT} but authentication failed.\\n\\n$FIRST_LINE"
+      fi
+    fi
+
+    RETRY_CHOICE=$(osascript -e "
+      set result to display dialog \"Could not connect to PostgreSQL.\\n\\n$CONN_ERROR\\n\\nWhat would you like to do?\" \\
+        with title \"Genreport Setup — Connection Failed\" \\
+        buttons {\"Continue Anyway\", \"Edit Credentials\", \"Retry\"} default button 3
+      return button returned of result")
+
+    if [ "$RETRY_CHOICE" = "Continue Anyway" ]; then
+      break
+    elif [ "$RETRY_CHOICE" = "Edit Credentials" ]; then
+      DB_HOST=$(ask "Database host:" "$DB_HOST")
+      DB_PORT=$(ask "Database port:" "$DB_PORT")
+      DB_NAME=$(ask "Database name:" "$DB_NAME")
+      DB_USER=$(ask "Database username:" "$DB_USER")
+      DB_PASS=""
+      while [ -z "$DB_PASS" ]; do
+        DB_PASS=$(ask "Database password (required):" "" "true")
+        if [ -z "$DB_PASS" ]; then
+          osascript -e "display dialog \"A database password is required.\\nPlease enter one.\" \\
+            with title \"Genreport Setup\" buttons {\"OK\"} default button 1" > /dev/null
+        fi
+      done
+    fi
+    # else: Retry — loop again with same credentials
+  done
+fi
 
 # ── Page 2: Application port ──────────────────────────────────────────────────
 # Auto-detect a free port starting at 2905
@@ -150,6 +260,8 @@ R2_URL="$R2_URL"
 JWT_SECRET="$JWT_SECRET"
 ENCRYPTION_KEY="$ENCRYPTION_KEY"
 OLLAMA_INSTALL="$OLLAMA_INSTALL"
+POSTGRES_INSTALL="$POSTGRES_INSTALL"
+DB_TESTED="$DB_TESTED"
 EOF
 
 chmod 600 /tmp/genreport_install_config

@@ -29,7 +29,103 @@ INSTALL_DIR="/Applications/Genreport"
 log "Checking install directory: $INSTALL_DIR"
 [ -d "$INSTALL_DIR" ] || die "Install directory $INSTALL_DIR does not exist"
 
+# ── Install PostgreSQL (if requested by preinstall) ───────────────────────────
+if [ "$POSTGRES_INSTALL" = "yes" ]; then
+  log "=== PostgreSQL installation requested ==="
+  PG_INSTALLED=false
+  PG_BIN_DIR=""
+
+  # Identify the actual console user (postinstall runs as root; brew must not)
+  CONSOLE_USER=$(stat -f "%Su" /dev/console 2>/dev/null || echo "")
+  log "Console user: ${CONSOLE_USER:-unknown}"
+
+  # ── Option 1: Homebrew ──────────────────────────────────────────────────────
+  BREW_BIN=""
+  for b in "/opt/homebrew/bin/brew" "/usr/local/bin/brew"; do
+    [ -x "$b" ] && BREW_BIN="$b" && break
+  done
+
+  if [ -n "$BREW_BIN" ] && [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+    log "Homebrew found at $BREW_BIN — installing postgresql@17 as $CONSOLE_USER..."
+    if sudo -u "$CONSOLE_USER" "$BREW_BIN" install postgresql@17; then
+      log "PostgreSQL installed via Homebrew."
+      sudo -u "$CONSOLE_USER" "$BREW_BIN" services start postgresql@17 \
+        && log "postgresql@17 service started." \
+        || log "Warning: brew services start returned non-zero (may already be running)"
+      PG_BIN_DIR=$(sudo -u "$CONSOLE_USER" "$BREW_BIN" --prefix postgresql@17 2>/dev/null)/bin
+      PG_INSTALLED=true
+    else
+      log "Homebrew install failed — falling back to EDB installer."
+    fi
+  else
+    [ -z "$BREW_BIN" ] && log "Homebrew not found — skipping Homebrew path."
+    [ "$CONSOLE_USER" = "root" ] && log "Console user is root — skipping Homebrew path."
+  fi
+
+  # ── Option 2: Bundled EDB installer ─────────────────────────────────────────
+  if [ "$PG_INSTALLED" = "false" ]; then
+    EDB_INSTALLER="$INSTALL_DIR/postgresql-17-installer.run"
+    log "Looking for bundled EDB installer at: $EDB_INSTALLER"
+    [ -f "$EDB_INSTALLER" ] || die "EDB PostgreSQL installer not found in $INSTALL_DIR. Reinstall the package."
+
+    log "Running EDB PostgreSQL 17 installer (headless)..."
+    chmod +x "$EDB_INSTALLER"
+    "$EDB_INSTALLER" \
+      --mode unattended \
+      --superpassword "$DB_PASS" \
+      --serverport "$DB_PORT" \
+      --prefix /Library/PostgreSQL/17 \
+      --datadir /Library/PostgreSQL/17/data \
+      --enable-components server,commandlinetools \
+      && log "PostgreSQL installed via EDB." \
+      || die "EDB PostgreSQL installation failed."
+
+    PG_BIN_DIR="/Library/PostgreSQL/17/bin"
+    PG_INSTALLED=true
+  fi
+
+  export PATH="$PG_BIN_DIR:$PATH"
+  log "pg bin dir: $PG_BIN_DIR"
+
+  # ── Wait for server to become ready (max 30s) ───────────────────────────────
+  log "Waiting for PostgreSQL to become ready..."
+  PG_READY=false
+  for i in $(seq 1 30); do
+    if pg_isready -h "$DB_HOST" -p "$DB_PORT" &>/dev/null 2>&1; then
+      log "PostgreSQL ready after ${i}s."
+      PG_READY=true
+      break
+    fi
+    sleep 1
+  done
+  [ "$PG_READY" = "true" ] || die "PostgreSQL did not become ready within 30 seconds."
+
+  # ── Ensure 'postgres' superuser role exists with the configured password ─────
+  # Homebrew installs create a cluster owned by the macOS user (not 'postgres').
+  # We create/alter the postgres role so Genreport can always use it.
+  log "Configuring postgres superuser role and password..."
+  SETUP_SQL="DO \$\$ BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'postgres') THEN
+      CREATE ROLE postgres SUPERUSER LOGIN PASSWORD '$DB_PASS';
+    ELSE
+      ALTER ROLE postgres SUPERUSER LOGIN PASSWORD '$DB_PASS';
+    END IF;
+  END \$\$;"
+
+  # Attempt as postgres user first (EDB path), then as console user (Homebrew path)
+  if ! ( PGPASSWORD="$DB_PASS" psql -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres -c "$SETUP_SQL" &>/dev/null 2>&1 ); then
+    if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+      sudo -u "$CONSOLE_USER" psql -d postgres -c "$SETUP_SQL" \
+        && log "postgres role configured via console user." \
+        || log "Warning: could not configure postgres role — manual setup may be needed."
+    fi
+  else
+    log "postgres role configured successfully."
+  fi
+fi
+
 # ── Run the config writer ─────────────────────────────────────────────────────
+
 log "Building configwriter args..."
 
 CW_ARGS=(
