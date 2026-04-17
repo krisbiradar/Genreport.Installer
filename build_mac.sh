@@ -2,6 +2,9 @@
 set -e
 
 echo "==> Preparing clean workspace..."
+# Strip immutable flags and ACLs copied from the read-only Postgres DMG
+chflags -R nouchg external_repos payload Genreport.pkg 2>/dev/null || true
+chmod -RN external_repos payload Genreport.pkg 2>/dev/null || true
 chmod -R u+w external_repos payload Genreport.pkg 2>/dev/null || true
 rm -rf external_repos payload Genreport.pkg
 mkdir -p external_repos payload
@@ -93,7 +96,7 @@ cp -r external_repos/frontend/dist/* payload/web/
 
 echo "==> Building .NET backend (Self-Contained)..."
 # We target osx-arm64 and produce a single standalone executable (GenReport.Api)
-dotnet publish external_repos/backend/GenReport.Api/GenReport.Api.csproj -c Release -r osx-arm64 --self-contained true -p:PublishSingleFile=true -o payload/dotnet
+dotnet publish external_repos/backend/GenReport.csproj -c Release -r osx-arm64 --self-contained true -p:PublishSingleFile=true -o payload/dotnet
 
 echo "==> Building Go service..."
 cd external_repos/go
