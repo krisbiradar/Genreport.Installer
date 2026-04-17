@@ -97,8 +97,22 @@ func startServices(dir string) []*exec.Cmd {
 
 	// .NET API — launcher sets ASPNETCORE_URLS so the API never needs to know
 	// the external port.
-	dotnetDll := filepath.Join(dir, "dotnet", "Genreport.Api.dll")
-	dotnetCmd := exec.Command(dotnetBin(dir), dotnetDll)
+	var dotnetCmd *exec.Cmd
+	standaloneBin := filepath.Join(dir, "dotnet", "GenReport.Api")
+	if runtime.GOOS == "windows" {
+		standaloneBin += ".exe"
+	}
+	
+	if _, err := os.Stat(standaloneBin); err == nil {
+		// Self-contained binary (no dotnet runtime needed)
+		dotnetCmd = exec.Command(standaloneBin)
+	} else {
+		// Framework-dependent fallback
+		dotnetDll := filepath.Join(dir, "dotnet", "GenReport.Api.dll")
+		dotnetCmd = exec.Command(dotnetBin(dir), dotnetDll)
+	}
+	
+	dotnetCmd.Dir = filepath.Join(dir, "dotnet")
 	dotnetCmd.Env = append(os.Environ(),
 		"ASPNETCORE_URLS=http://localhost:"+internalDotnetPort,
 		"ASPNETCORE_ENVIRONMENT=Production",
