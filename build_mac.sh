@@ -2,6 +2,7 @@
 set -e
 
 echo "==> Preparing clean workspace..."
+chmod -R u+w external_repos payload Genreport.pkg 2>/dev/null || true
 rm -rf external_repos payload Genreport.pkg
 mkdir -p external_repos payload
 
@@ -73,10 +74,31 @@ if [ "${PGAPP_SKIP:-0}" -eq 0 ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# TODO: Add your build commands for the 3 cloned repos here!
-# Example:
-#   cd external_repos/frontend && npm install && npm run build
-#   cp -r dist ../../payload/web
+# ── Build all core application components ────────────────────────────────────
+echo "==> Loading environment paths (for Homebrew node/go)..."
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+echo "==> Building Go launcher..."
+cd launcher
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../payload/launcher .
+cd ..
+
+echo "==> Building React frontend..."
+cd external_repos/frontend
+npm install
+npm run build
+cd ../..
+mkdir -p payload/web
+cp -r external_repos/frontend/dist/* payload/web/
+
+echo "==> Building .NET backend (Self-Contained)..."
+# We target osx-arm64 and produce a single standalone executable (GenReport.Api)
+dotnet publish external_repos/backend/GenReport.Api/GenReport.Api.csproj -c Release -r osx-arm64 --self-contained true -p:PublishSingleFile=true -o payload/dotnet
+
+echo "==> Building Go service..."
+cd external_repos/go
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../../payload/go/goservice .
+cd ../..
 # -----------------------------------------------------------------------------
 
 echo "==> Setting installer script permissions..."

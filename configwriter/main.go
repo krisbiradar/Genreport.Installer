@@ -119,6 +119,9 @@ func writeLauncherConf(dir string) error {
 		return err
 	}
 	path := filepath.Join(dir, "genreport.conf")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -165,6 +168,9 @@ func writeAppSettings(dir string) error {
 		return err
 	}
 	path := filepath.Join(dir, "dotnet", "appsettings.Production.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return err
@@ -213,6 +219,9 @@ func writeDotEnv(dir string) error {
 		return err
 	}
 	path := filepath.Join(dir, "go", ".env")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
 	f, err := os.Create(path)
 	if err != nil {
 		return err

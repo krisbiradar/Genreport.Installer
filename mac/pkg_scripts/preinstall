@@ -33,10 +33,9 @@ ask() {
 
 # ── Helper: section banner ────────────────────────────────────────────────────
 banner() {
-  osascript -e "
-    display dialog \"$1\" \
-      with title \"Genreport Setup\" \
-      buttons {\"Continue\"} default button 1" > /dev/null
+  osascript <<EOF > /dev/null
+    display dialog "$1" with title "Genreport Setup" buttons {"Continue"} default button 1
+EOF
 }
 
 # ── Step 1: PostgreSQL Detection & Database Setup ────────────────────────────
@@ -44,55 +43,74 @@ POSTGRES_INSTALL="no"
 POSTGRES_SOURCE="external"
 DB_TESTED="no"
 
-# Detect PostgreSQL: check common binary locations or if port 5432 is listening
-_pg_detect() {
-  command -v psql &>/dev/null && return 0
-  command -v pg_isready &>/dev/null && return 0
+# Detect PostgreSQL: check common binary locations
+# Only returns success if psql is actually available (not just a TCP probe),
+# because the external path needs psql for the connection test.
+_find_psql() {
+  # Returns the full path to psql, searching common locations.
+  # Also exports PATH so subsequent calls to psql work directly.
+  command -v psql &>/dev/null && { echo "psql"; return 0; }
   for p in \
       "/opt/homebrew/opt/postgresql@17/bin" \
       "/opt/homebrew/opt/postgresql@16/bin" \
+      "/opt/homebrew/opt/postgresql/bin" \
       "/usr/local/opt/postgresql@17/bin" \
-      "/usr/local/opt/postgresql@16/bin"; do
-    [ -x "$p/psql" ] && export PATH="$p:$PATH" && return 0
+      "/usr/local/opt/postgresql@16/bin" \
+      "/usr/local/opt/postgresql/bin" \
+      "/Applications/Postgres.app/Contents/Versions/latest/bin" \
+      "/Applications/Postgres.app/Contents/Versions/17/bin" \
+      "/Applications/Postgres.app/Contents/Versions/16/bin"; do
+    [ -x "$p/psql" ] && export PATH="$p:$PATH" && echo "$p/psql" && return 0
   done
   for p in /Library/PostgreSQL/*/bin; do
-    [ -x "$p/psql" ] && export PATH="$p:$PATH" && return 0
+    [ -x "$p/psql" ] && export PATH="$p:$PATH" && echo "$p/psql" && return 0
   done
-  # Fall back to a raw TCP probe on the default pg port
-  nc -z -w3 localhost 5432 &>/dev/null 2>&1 && return 0
+  return 1
+}
+
+_pg_detect() {
+  _find_psql &>/dev/null && return 0
   return 1
 }
 
 if ! _pg_detect; then
-  PG_CHOICE=$(osascript -e "
-    set result to display dialog \"PostgreSQL was not detected on this Mac.\\n\\nGenreport requires PostgreSQL to store its data.\\n\\nThe installer can automatically download and install PostgreSQL 17 for you, or you can point it at an existing server.\" \\
-      with title \"Genreport Setup — Database\" \\
-      buttons {\"I Have My Own Server\", \"Install PostgreSQL (Recommended)\"} default button 2
-    return button returned of result")
+  POSTGRES_INSTALL="yes"
+  POSTGRES_SOURCE="managed"
 
-  if [ "$PG_CHOICE" = "Install PostgreSQL (Recommended)" ]; then
-    POSTGRES_INSTALL="yes"
-    POSTGRES_SOURCE="managed"
-    # Managed install uses fixed defaults; only ask DB name + mandatory password
-    DB_HOST="localhost"
-    DB_PORT="5432"
-    DB_USER="postgres"
-    DB_NAME=$(ask "Database name:" "genreport")
-    DB_PASS=""
-    while [ -z "$DB_PASS" ]; do
-      DB_PASS=$(ask "PostgreSQL superuser password (required — cannot be empty):" "" "true")
-      if [ -z "$DB_PASS" ]; then
-        osascript -e "display dialog \"A password is required for the postgres superuser.\\nPlease enter one.\" \\
-          with title \"Genreport Setup\" buttons {\"OK\"} default button 1" > /dev/null
-      fi
-    done
+  osascript <<'APPLESCRIPT' > /dev/null
+    display dialog "PostgreSQL was not detected on this Mac." & return & return & "The installer will automatically set up PostgreSQL 17 for you." with title "Genreport Setup - Database" buttons {"Continue"} default button 1
+APPLESCRIPT
+
+  # Managed install uses fixed defaults; only ask DB name + mandatory password
+  DB_HOST="localhost"
+  DB_PORT="5432"
+  DB_USER="postgres"
+  DB_NAME=$(ask "Database name:" "genreport")
+  DB_PASS=$(osascript -e '
+    set maxTries to 3
+    repeat maxTries times
+      set result to display dialog "Set a password for the PostgreSQL superuser (required):" default answer "" with hidden answer with title "Genreport Setup" buttons {"Continue"} default button 1
+      set pw to text returned of result
+      if pw is not "" then return pw
+      set maxTries to maxTries - 1
+      if maxTries is 0 then
+        return "__ABORT__"
+      end if
+      display dialog "A password is required for the postgres superuser. (" & maxTries & " attempts remaining)" with title "Genreport Setup" buttons {"OK"} default button 1
+    end repeat
+    return "__ABORT__"')
+  if [ "$DB_PASS" = "__ABORT__" ]; then
+    osascript -e 'display dialog "Installation cancelled: a database password is required." with title "Genreport Setup" buttons {"OK"} default button 1 with icon stop' > /dev/null
+    exit 1
   fi
-  # If user chose 'I Have My Own Server', POSTGRES_SOURCE remains 'external'
 fi
 
 # ── Collect external DB credentials + test connection ─────────────────────────
 if [ "$POSTGRES_SOURCE" = "external" ]; then
-  banner "Step 1 of 5 — Database configuration\n\nWARNING: If the database already exists it will be overwritten.\n\nEnter your PostgreSQL connection details. The installer will verify the connection before proceeding."
+  osascript <<'APPLESCRIPT' > /dev/null
+    set msg to "Step 1 of 5 - Database configuration" & return & return & "WARNING: If the database already exists it will be overwritten." & return & return & "Enter your PostgreSQL connection details. The installer will verify the connection before proceeding."
+    display dialog msg with title "Genreport Setup" buttons {"Continue"} default button 1
+APPLESCRIPT
 
   DB_HOST=$(ask "Database host:" "localhost")
   DB_PORT=$(ask "Database port:" "5432")
@@ -100,23 +118,26 @@ if [ "$POSTGRES_SOURCE" = "external" ]; then
   DB_USER=$(ask "Database username:" "postgres")
 
   # Mandatory password
-  DB_PASS=""
-  while [ -z "$DB_PASS" ]; do
-    DB_PASS=$(ask "Database password (required):" "" "true")
-    if [ -z "$DB_PASS" ]; then
-      osascript -e "display dialog \"A database password is required.\\nPlease enter one.\" \\
-        with title \"Genreport Setup\" buttons {\"OK\"} default button 1" > /dev/null
-    fi
-  done
+  DB_PASS=$(osascript -e '
+    set maxTries to 3
+    repeat maxTries times
+      set result to display dialog "Database password (required):" default answer "" with hidden answer with title "Genreport Setup" buttons {"Continue"} default button 1
+      set pw to text returned of result
+      if pw is not "" then return pw
+      set maxTries to maxTries - 1
+      if maxTries is 0 then
+        return "__ABORT__"
+      end if
+      display dialog "A database password is required. (" & maxTries & " attempts remaining)" with title "Genreport Setup" buttons {"OK"} default button 1
+    end repeat
+    return "__ABORT__"')
+  if [ "$DB_PASS" = "__ABORT__" ]; then
+    osascript -e 'display dialog "Installation cancelled: a database password is required." with title "Genreport Setup" buttons {"OK"} default button 1 with icon stop' > /dev/null
+    exit 1
+  fi
 
-  # ── Connection test retry loop ──────────────────────────────────────────────
-  # Note: we connect to the 'postgres' system db — the target DB ($DB_NAME)
-  # may not exist yet (Genreport creates it on first launch). That's fine.
-  #
-  # Error messages are written to a temp file and read by AppleScript via
-  # 'do shell script "cat ..."' — this avoids all bash→AppleScript quoting
-  # issues (psql errors routinely contain literal " characters such as:
-  #   connection to server at "localhost" (127.0.0.1) failed).
+  # We connect to the 'postgres' system db — the target DB ($DB_NAME) may not
+  # exist yet (Genreport creates it on first launch). That's fine.
   CONN_ERR_FILE="/tmp/genreport_conn_error.txt"
 
   while true; do
@@ -127,11 +148,9 @@ if [ "$POSTGRES_SOURCE" = "external" ]; then
         "$DB_HOST" "$DB_PORT" > "$CONN_ERR_FILE"
     else
       # Port is open — test authentication against the 'postgres' system db.
-      # IMPORTANT: use '|| AUTH_CODE=$?' on the same line as the $() assignment.
-      # Under set -e, a failing subshell inside $() exits the script immediately
-      # if the assignment itself returns non-zero — AUTH_CODE=$? would never run.
+      PSQL_BIN=$(_find_psql)
       AUTH_CODE=0
-      AUTH_OUT=$(PGPASSWORD="$DB_PASS" psql \
+      AUTH_OUT=$(PGPASSWORD="$DB_PASS" "$PSQL_BIN" \
         -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" \
         -d postgres -c "\q" 2>&1) || AUTH_CODE=$?
       if [ "$AUTH_CODE" -eq 0 ]; then
@@ -139,7 +158,6 @@ if [ "$POSTGRES_SOURCE" = "external" ]; then
         rm -f "$CONN_ERR_FILE"
         break
       else
-        # Write the raw psql error — no escaping needed, AppleScript reads the file
         printf 'Reached %s:%s but authentication failed.\n\n%s' \
           "$DB_HOST" "$DB_PORT" "$(echo "$AUTH_OUT" | head -3)" > "$CONN_ERR_FILE"
       fi
@@ -147,12 +165,12 @@ if [ "$POSTGRES_SOURCE" = "external" ]; then
 
     # Guard with || true: if osascript exits non-zero (e.g. dialog force-closed),
     # RETRY_CHOICE is empty and the if-chain falls through → loop retries safely.
-    RETRY_CHOICE=$(osascript -e "
-      set errMsg to do shell script \"cat /tmp/genreport_conn_error.txt\"
-      set result to display dialog \"Could not connect to PostgreSQL.\" & return & return & errMsg & return & return & \"What would you like to do?\" \\
-        with title \"Genreport Setup — Connection Failed\" \\
-        buttons {\"Continue Anyway\", \"Edit Credentials\", \"Retry\"} default button 3
-      return button returned of result") || true
+    RETRY_CHOICE=$(osascript <<'APPLESCRIPT' || true
+      set errMsg to do shell script "cat /tmp/genreport_conn_error.txt"
+      set result to display dialog "Could not connect to PostgreSQL." & return & return & errMsg & return & return & "What would you like to do?" with title "Genreport Setup - Connection Failed" buttons {"Continue Anyway", "Edit Credentials", "Retry"} default button 3
+      return button returned of result
+APPLESCRIPT
+    )
 
 
     if [ "$RETRY_CHOICE" = "Continue Anyway" ]; then
@@ -162,14 +180,23 @@ if [ "$POSTGRES_SOURCE" = "external" ]; then
       DB_PORT=$(ask "Database port:" "$DB_PORT")
       DB_NAME=$(ask "Database name:" "$DB_NAME")
       DB_USER=$(ask "Database username:" "$DB_USER")
-      DB_PASS=""
-      while [ -z "$DB_PASS" ]; do
-        DB_PASS=$(ask "Database password (required):" "" "true")
-        if [ -z "$DB_PASS" ]; then
-          osascript -e "display dialog \"A database password is required.\\nPlease enter one.\" \\
-            with title \"Genreport Setup\" buttons {\"OK\"} default button 1" > /dev/null
-        fi
-      done
+      DB_PASS=$(osascript -e '
+        set maxTries to 3
+        repeat maxTries times
+          set result to display dialog "Database password (required):" default answer "" with hidden answer with title "Genreport Setup" buttons {"Continue"} default button 1
+          set pw to text returned of result
+          if pw is not "" then return pw
+          set maxTries to maxTries - 1
+          if maxTries is 0 then
+            return "__ABORT__"
+          end if
+          display dialog "A database password is required. (" & maxTries & " attempts remaining)" with title "Genreport Setup" buttons {"OK"} default button 1
+        end repeat
+        return "__ABORT__"')
+      if [ "$DB_PASS" = "__ABORT__" ]; then
+        osascript -e 'display dialog "Installation cancelled: a database password is required." with title "Genreport Setup" buttons {"OK"} default button 1 with icon stop' > /dev/null
+        exit 1
+      fi
     fi
     # else: Retry — loop again with same credentials
   done
@@ -190,22 +217,18 @@ DEFAULT_PORT=2905
 AUTO_PORT=$(find_free_port "$DEFAULT_PORT")
 
 if [ "$AUTO_PORT" -ne "$DEFAULT_PORT" ]; then
-  PORT_MSG="Port $DEFAULT_PORT is already in use.\\nGenreport will use port $AUTO_PORT instead.\\n\\nClick 'Use $AUTO_PORT' to accept, or 'Override' to enter a different port."
+  PORT_MSG="Port $DEFAULT_PORT is already in use. Genreport will use port $AUTO_PORT instead."
 else
-  PORT_MSG="Genreport will run on port $AUTO_PORT.\\n\\nClick 'Use $AUTO_PORT' to accept, or 'Override' to enter a different port."
+  PORT_MSG="Genreport will run on port $AUTO_PORT."
 fi
 
-PORT_CHOICE=$(osascript -e "
-  set result to display dialog \"$PORT_MSG\" \\
-    with title \"Genreport Setup — Application Port\" \\
-    buttons {\"Override\", \"Use $AUTO_PORT\"} default button \"Use $AUTO_PORT\"
-  return button returned of result")
+PORT_CHOICE=$(osascript -e "set result to display dialog \"$PORT_MSG\" with title \"Genreport Setup - Application Port\" buttons {\"Override\", \"Use $AUTO_PORT\"} default button \"Use $AUTO_PORT\"" -e "return button returned of result")
 
 if [ "$PORT_CHOICE" = "Override" ]; then
   USER_PORT=$(ask "Enter a custom port number:" "$AUTO_PORT")
   # Validate user-supplied port
   if [[ ! "$USER_PORT" =~ ^[0-9]+$ ]] || [ "$USER_PORT" -lt 1024 ] || [ "$USER_PORT" -gt 65535 ]; then
-    osascript -e "display dialog \"Invalid port '$USER_PORT'. Falling back to $AUTO_PORT.\" with title \"Genreport Setup\" buttons {\"OK\"} default button 1" > /dev/null
+    osascript -e "display dialog \"Invalid port. Falling back to $AUTO_PORT.\" with title \"Genreport Setup\" buttons {\"OK\"} default button 1" > /dev/null
     APP_PORT="$AUTO_PORT"
   else
     # Check if the user's chosen port is free too
@@ -219,7 +242,10 @@ else
 fi
 
 # ── Page 3: SMTP ──────────────────────────────────────────────────────────────
-banner "Step 3 of 4 — Email (SMTP)\n\nOutbound email settings. Leave blank to configure later."
+osascript <<'APPLESCRIPT' > /dev/null
+  set msg to "Step 3 of 4 - Email (SMTP)" & return & return & "Outbound email settings. Leave blank to configure later."
+  display dialog msg with title "Genreport Setup" buttons {"Continue"} default button 1
+APPLESCRIPT
 
 SMTP_HOST=$(ask "SMTP host (leave blank to skip):" "")
 SMTP_PORT=$(ask "SMTP port:" "587")
@@ -228,7 +254,10 @@ SMTP_PASS=$(ask "SMTP password:" "" "true")
 SMTP_FROM=$(ask "From address:" "noreply@genreport.app")
 
 # ── Page 4: Cloudflare R2 ─────────────────────────────────────────────────────
-banner "Step 4 of 4 — R2 Storage (Cloudflare)\n\nLeave blank to configure later."
+osascript <<'APPLESCRIPT' > /dev/null
+  set msg to "Step 4 of 4 - R2 Storage (Cloudflare)" & return & return & "Leave blank to configure later."
+  display dialog msg with title "Genreport Setup" buttons {"Continue"} default button 1
+APPLESCRIPT
 
 R2_ACCOUNT=$(ask "R2 Account ID:" "")
 R2_BUCKET=$(ask "R2 Bucket:" "")
@@ -237,7 +266,10 @@ R2_SECRET=$(ask "R2 Secret Key:" "" "true")
 R2_URL=$(ask "R2 Public URL:" "")
 
 # ── Page 5: Security keys ─────────────────────────────────────────────────────────
-banner "Step 5 of 5 — Security keys\n\nLeave as '(auto-generate)' to have the installer create strong random 256-bit keys.\n\nEnter custom values only when migrating an existing installation."
+osascript <<'APPLESCRIPT' > /dev/null
+  set msg to "Step 5 of 5 - Security keys" & return & return & "Leave as (auto-generate) to have the installer create strong random 256-bit keys." & return & return & "Enter custom values only when migrating an existing installation."
+  display dialog msg with title "Genreport Setup" buttons {"Continue"} default button 1
+APPLESCRIPT
 
 JWT_SECRET=$(ask "JWT signing secret (leave as-is to auto-generate):" "(auto-generate)" "true")
 ENCRYPTION_KEY=$(ask "Encryption master key (leave as-is to auto-generate):" "(auto-generate)" "true")
