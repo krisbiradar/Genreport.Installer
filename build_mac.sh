@@ -96,7 +96,7 @@ cp -r external_repos/frontend/dist/* payload/web/
 
 echo "==> Building .NET backend (Self-Contained)..."
 # We target osx-arm64 and produce a single standalone executable (GenReport.Api)
-dotnet publish external_repos/backend/GenReport.csproj -c Release -r osx-arm64 --self-contained true -p:PublishSingleFile=true -o payload/dotnet
+dotnet publish external_repos/backend/GenReport.Api/GenReport.csproj -c Release -r osx-arm64 --self-contained true -p:PublishSingleFile=true -p:AssemblyName=GenReport.Api -o payload/dotnet
 
 echo "==> Building Go service..."
 cd external_repos/go
