@@ -174,7 +174,16 @@ git push origin v1.0.0
 
 ---
 
+## 🔗 Related Repositories
+
+| Repo | Description |
+|---|---|
+| [GenReport](https://github.com/krisbiradar/GenReport) | Main repository — overview, quick start & docs |
+| [GenReport.Go](https://github.com/krisbiradar/GenReport.Go) | Go service layer — HTTP server & process orchestration |
+| [GenReport.ClientWebsite](https://github.com/krisbiradar/GenReport.ClientWebsite) | React frontend — dashboards, chart builder & web UI |
+
+---
+
 ## License
 
 [MIT](LICENSE) © 2026 Kris Biradar
-
