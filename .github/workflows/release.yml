@@ -58,30 +58,6 @@ jobs:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.artifact }}
 
-  # ── Windows installer (Inno Setup) ─────────────────────────────────────────
-  build-windows-installer:
-    name: Build Windows installer
-    needs: build-configwriter
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-  
-      - uses: actions/download-artifact@v4
-        with:
-          name: configwriter.exe
-          path: publish/
-
-      # TODO: Build repos and put launcher.exe, dotnet publish, goservice.exe, web, ollama, rabbitmq, models here
-
-      - name: Compile Inno Setup script
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
-        with:
-          path: windows/setup.iss
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: GenreportSetup.exe
-          path: windows/dist/GenreportSetup.exe
 
   # ── macOS installer (pkgbuild) ─────────────────────────────────────────────
   build-mac-installer:
@@ -140,7 +116,7 @@ jobs:
   # ── Publish GitHub Release ─────────────────────────────────────────────────
   publish-release:
     name: Publish GitHub Release
-    needs: [build-windows-installer, build-mac-installer]
+    needs: [build-mac-installer]
     runs-on: ubuntu-latest
     environment:
       name: release-approval
@@ -153,6 +129,6 @@ jobs:
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: "v1.0.${{ github.run_number }}"
           files: |
-            release-artifacts/GenreportSetup.exe/GenreportSetup.exe
             release-artifacts/Genreport.pkg/Genreport.pkg
