@@ -240,6 +240,10 @@ PLIST_DST="/Library/LaunchDaemons/com.genreport.launcher.plist"
 log "Checking plist file: $PLIST_SRC"
 [ -f "$PLIST_SRC" ] || die "Plist file not found: $PLIST_SRC"
 
+log "Creating log directory for launcher..."
+mkdir -p /var/log/genreport
+chmod 755 /var/log/genreport
+
 log "Copying plist to LaunchDaemons..."
 cp "$PLIST_SRC" "$PLIST_DST" && log "Plist copied." || die "Failed to copy plist"
 

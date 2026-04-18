@@ -13,7 +13,7 @@ package main
 
 import (
 	"crypto/rand"
-	"encoding/hex"
+	"encoding/base64"
 	"flag"
 	"fmt"
 	"log"
@@ -61,14 +61,13 @@ var (
 	encryptionKey = flag.String("encryptionkey", "", "AES encryption master key (auto-generated if blank)")
 )
 
-// generateSecret returns a cryptographically-random hex string of the given byte length.
-// byteLen=32 → 64 hex chars (256-bit key).
+// generateSecret returns a cryptographically-random base64 string of the given byte length.
 func generateSecret(byteLen int) string {
 	b := make([]byte, byteLen)
 	if _, err := rand.Read(b); err != nil {
 		log.Fatalf("failed to generate random secret: %v", err)
 	}
-	return hex.EncodeToString(b)
+	return base64.StdEncoding.EncodeToString(b)
 }
 
 func main() {
@@ -139,11 +138,18 @@ const appSettingsTemplate = `{
     "DefaultConnection": "Host={{.DBHost}};Port={{.DBPort}};Database={{.DBName}};Username={{.DBUser}};Password={{.DBPass}}"
   },
   "AppSettings": {
-    "GoServiceUrl": "http://localhost:{{.InternalGoPort}}",
-    "JwtSecret": "{{.JwtSecret}}",
-    "EncryptionKey": "{{.EncryptionKey}}",
-    "CreateDb": true,
-    "DeleteDb": true
+    "createDB": true,
+    "seedDB": true,
+    "deleteDB": true,
+    "port": {{.InternalDotnetPort}},
+    "CommandTimeout": 12333,
+    "IssuerSigningKey": "{{.JwtSecret}}",
+    "IssuerRefreshKey": "{{.JwtSecret}}",
+    "AccessTokenExpiry": 15,
+    "RefreshTokenExpiry": 60,
+    "GoPort": {{.InternalGoPort}},
+    "GoTestConnectionPath": "/connections/test",
+    "EncryptionMasterKey": "{{.EncryptionKey}}"
   },
   "Smtp": {
     "Host":     "{{.SmtpHost}}",
@@ -188,6 +194,7 @@ DB_PORT={{.DBPort}}
 DB_NAME={{.DBName}}
 DB_USER={{.DBUser}}
 DB_PASSWORD={{.DBPass}}
+DATABASE_URL=postgres://{{.DBUser}}:{{.DBPass}}@{{.DBHost}}:{{.DBPort}}/{{.DBName}}?sslmode=disable
 
 CREATE_DB=true
 DELETE_DB=true

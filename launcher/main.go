@@ -38,6 +38,13 @@ const (
 
 const defaultAppPort = "2905"
 
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("[genreport->proxy] %s %s", r.Method, r.URL.Path)
+		next.ServeHTTP(w, r)
+	})
+}
+
 func main() {
 	dir := installDir()
 	appPort := readAppPort(filepath.Join(dir, "genreport.conf"))
@@ -57,14 +64,14 @@ func main() {
 	dotnetProxy := newReverseProxy("http://localhost:" + internalDotnetPort)
 	goProxy     := newReverseProxy("http://localhost:" + internalGoPort)
 
-	mux.Handle("/api/", dotnetProxy)                                                      // .NET REST API
+	mux.Handle("/api/", http.StripPrefix("/api", dotnetProxy))                          // .NET REST API
 	mux.Handle("/hub/", dotnetProxy)                                                      // .NET SignalR hubs
 	mux.Handle("/go/",  http.StripPrefix("/go", goProxy))                                 // Go service
 	mux.Handle("/",     http.FileServer(http.Dir(filepath.Join(dir, "web"))))             // React SPA
 
 	srv := &http.Server{
 		Addr:         ":" + appPort,
-		Handler:      mux,
+		Handler:      loggingMiddleware(mux),
 		ReadTimeout:  60 * time.Second,
 		WriteTimeout: 120 * time.Second,
 	}
@@ -98,7 +105,7 @@ func startServices(dir string) []*exec.Cmd {
 	// .NET API — launcher sets ASPNETCORE_URLS so the API never needs to know
 	// the external port.
 	var dotnetCmd *exec.Cmd
-	standaloneBin := filepath.Join(dir, "dotnet", "GenReport.Api")
+	standaloneBin := filepath.Join(dir, "dotnet", "GenReport")
 	if runtime.GOOS == "windows" {
 		standaloneBin += ".exe"
 	}
@@ -108,7 +115,7 @@ func startServices(dir string) []*exec.Cmd {
 		dotnetCmd = exec.Command(standaloneBin)
 	} else {
 		// Framework-dependent fallback
-		dotnetDll := filepath.Join(dir, "dotnet", "GenReport.Api.dll")
+		dotnetDll := filepath.Join(dir, "dotnet", "GenReport.dll")
 		dotnetCmd = exec.Command(dotnetBin(dir), dotnetDll)
 	}
 	
