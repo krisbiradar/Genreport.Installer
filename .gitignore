@@ -3,6 +3,7 @@ windows/dist/
 mac/dist/
 payload/
 publish/
+external_repos/
 *.exe
 *.pkg
 configwriter-darwin-*
@@ -17,3 +18,4 @@ configwriter/vendor/
 .vscode/
 .idea/
 *.swp
+/external_repos
