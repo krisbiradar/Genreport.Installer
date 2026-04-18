@@ -18,6 +18,7 @@ on:
       - master
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
 
 jobs:
 
@@ -114,36 +115,22 @@ jobs:
           ref: master
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-go@v5
         with:
-          name: configwriter-darwin-arm64   # swap for amd64 or use a universal binary
-          path: publish/
+          go-version: '1.22'
 
-      - name: Make scripts executable
-        run: chmod +x mac/pkg_scripts/preinstall mac/pkg_scripts/postinstall
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Prepare macOS Payload
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build and Package Mac Installer
         run: |
-          mkdir -p payload
-          # Copy the configwriter and rename it so postinstall finds it
-          cp publish/configwriter-darwin-arm64 payload/configwriter
-          chmod +x payload/configwriter
-          
-          # Copy the launch daemon plist
-          cp mac/com.genreport.launcher.plist payload/
-          
-          # TODO: Build projects from external_repos/ and copy into payload/ here...
-          # cp -r external_repos/frontend/dist payload/web
-
-      - name: Build .pkg
-        run: |
-          pkgbuild \
-            --root payload/ \
-            --scripts mac/pkg_scripts \
-            --identifier com.genreport.installer \
-            --version "1.0.0-${GITHUB_SHA::7}" \
-            --install-location /Applications/Genreport \
-            Genreport.pkg
+          chmod +x build_mac_silicon.sh
+          ./build_mac_silicon.sh
 
       - uses: actions/upload-artifact@v4
         with:
@@ -155,6 +142,8 @@ jobs:
     name: Publish GitHub Release
     needs: [build-windows-installer, build-mac-installer]
     runs-on: ubuntu-latest
+    environment:
+      name: release-approval
     permissions:
       contents: write
     steps:
