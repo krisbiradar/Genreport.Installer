@@ -129,8 +129,8 @@ jobs:
 
       - name: Build and Package Mac Installer
         run: |
-          chmod +x build_mac.sh
-          ./build_mac.sh
+          chmod +x build_mac_silicon.sh
+          ./build_mac_silicon.sh
 
       - uses: actions/upload-artifact@v4
         with:
