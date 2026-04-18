@@ -106,6 +106,14 @@ CGO_ENABLED=1 GOOS=darwin GOARCH=arm64 go build \
   -o ../../payload/go/goservice \
   ./cmd/server
 cd ../..
+
+echo "==> Building configwriter..."
+cd configwriter
+CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o ../payload/configwriter .
+cd ..
+
+echo "==> Copying launch daemon plist..."
+cp mac/com.genreport.launcher.plist payload/
 # -----------------------------------------------------------------------------
 
 echo "==> Setting installer script permissions..."
